@@ -1,5 +1,6 @@
 import {
   createScraper,
+  ScraperErrorTypes,
   type HealthFundId,
   type ScraperOptions,
 } from 'israeli-health-scrapers';
@@ -45,10 +46,20 @@ export async function fetchFund(
   const result = await scraper.scrape(credentials);
 
   if (!result.success) {
+    // fetch deliberately never carries an otpCodeRetriever — it runs unattended. This
+    // exact errorType is what "the stored session no longer works" looks like: it
+    // expired, or the member logged in elsewhere and the fund invalidated it. The
+    // library's message talks about otpCodeRetriever, which means nothing to a member
+    // deciding what to do next.
+    const errorMessage =
+      result.errorType === ScraperErrorTypes.TwoFactorRetrieverMissing
+        ? `Session expired or you logged in elsewhere. Run: health-mcp login ${companyId}`
+        : result.errorMessage;
+
     finishSyncRun(runId, {
       success: false,
       errorType: result.errorType,
-      errorMessage: result.errorMessage,
+      errorMessage,
     });
 
     return {
@@ -56,7 +67,7 @@ export async function fetchFund(
       success: false,
       recordCount: 0,
       errorType: result.errorType,
-      errorMessage: result.errorMessage,
+      errorMessage,
     };
   }
 
