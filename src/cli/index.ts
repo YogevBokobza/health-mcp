@@ -18,6 +18,9 @@ import { fetchFunds } from '../sync/fetch.js';
 import { writeClaudeConfig } from './configure-claude.js';
 
 process.env.IHS_DATA_DIR ??= scraperDataDir();
+// The library encrypts stored sessions with its own key; reuse HEALTH_MCP_KEY rather
+// than asking the member to manage a second secret.
+process.env.IHS_SESSION_KEY ??= process.env.HEALTH_MCP_KEY;
 
 const credentialsFileSchema = z.array(
   z.object({

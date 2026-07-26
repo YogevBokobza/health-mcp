@@ -35,6 +35,9 @@ const AUTH_COMPLETE_TOOL = 'auth_complete';
 
 // Keep the library's sessions and diagnostics inside our app data dir.
 process.env.IHS_DATA_DIR ??= scraperDataDir();
+// The library encrypts stored sessions with its own key; reuse HEALTH_MCP_KEY rather
+// than asking the member to manage a second secret.
+process.env.IHS_SESSION_KEY ??= process.env.HEALTH_MCP_KEY;
 
 function log(message: string, fields: Record<string, unknown> = {}): void {
   // stderr only: stdout carries the MCP protocol stream.
