@@ -110,50 +110,5 @@ export function listMedications(options: {
     .all(params) as StoredMedication[];
 }
 
-export interface SyncRun {
-  id: number;
-  company_id: string;
-  started_at: string;
-  finished_at: string | null;
-  success: number;
-  error_type: string | null;
-  error_message: string | null;
-  record_count: number;
-}
-
-export function startSyncRun(companyId: HealthFundId): number {
-  const result = openDatabase()
-    .prepare('INSERT INTO sync_runs (company_id, started_at) VALUES (?, ?)')
-    .run(companyId, new Date().toISOString());
-
-  return Number(result.lastInsertRowid);
-}
-
-export function finishSyncRun(
-  id: number,
-  outcome: { success: boolean; recordCount?: number; errorType?: string; errorMessage?: string },
-): void {
-  openDatabase()
-    .prepare(
-      `UPDATE sync_runs
-         SET finished_at = ?, success = ?, record_count = ?, error_type = ?, error_message = ?
-       WHERE id = ?`,
-    )
-    .run(
-      new Date().toISOString(),
-      outcome.success ? 1 : 0,
-      outcome.recordCount ?? 0,
-      outcome.errorType ?? null,
-      outcome.errorMessage ?? null,
-      id,
-    );
-}
-
-/** The most recent run per fund, so a caller can tell how stale the data is. */
-export function lastSyncRun(companyId: HealthFundId): SyncRun | null {
-  return (
-    (openDatabase()
-      .prepare('SELECT * FROM sync_runs WHERE company_id = ? ORDER BY id DESC LIMIT 1')
-      .get(companyId) as SyncRun | undefined) ?? null
-  );
-}
+// Sync-run tracking (startSyncRun/finishSyncRun/lastSyncRun) lives in ./sync-runs.js —
+// it isn't medications-specific, appointments uses the same history table.

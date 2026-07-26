@@ -8,11 +8,15 @@
 
 export { openDatabase, closeDatabase, databaseExists, DatabaseKeyError } from './db/database.js';
 export { saveCredentials, getCredentials, listCredentialedFunds } from './db/credentials.js';
-export { listMedications, lastSyncRun } from './db/medications.js';
+export { listMedications } from './db/medications.js';
+export { listAppointments } from './db/appointments.js';
+export { startSyncRun, finishSyncRun, lastSyncRun } from './db/sync-runs.js';
 export { runSafeQuery, assertSafeSelect, listTables, describeTable, UnsafeQueryError } from './db/query.js';
-export type { StoredMedication, SyncRun } from './db/medications.js';
+export type { StoredMedication } from './db/medications.js';
+export type { StoredAppointment } from './db/appointments.js';
+export type { SyncRun, SyncResource } from './db/sync-runs.js';
 
-export { fetchFund, fetchFunds } from './sync/fetch.js';
+export { fetchFund, fetchFunds, fetchAppointmentsForFund } from './sync/fetch.js';
 export type { FetchOutcome } from './sync/fetch.js';
 
 export { allOperations, operationsFor, findOperation, configuredFunds } from './operations.js';

@@ -13,7 +13,8 @@ import {
   requireCredentials,
   saveCredentials,
 } from '../db/credentials.js';
-import { lastSyncRun, listMedications } from '../db/medications.js';
+import { listMedications } from '../db/medications.js';
+import { lastSyncRun } from '../db/sync-runs.js';
 import { fetchFunds } from '../sync/fetch.js';
 import { writeClaudeConfig } from './configure-claude.js';
 
@@ -159,7 +160,7 @@ function status(): void {
 
   stdout.write('\nfund      last sync\n');
   for (const fund of funds) {
-    const sync = lastSyncRun(fund);
+    const sync = lastSyncRun(fund, 'medications');
     stdout.write(
       `${fund.padEnd(10)}${
         sync

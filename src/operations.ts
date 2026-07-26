@@ -3,9 +3,11 @@ import { SCRAPERS, type HealthFundId } from 'israeli-health-scrapers';
 
 import { scope, type Capability, type Resource, type Scope } from './permissions/scopes.js';
 import { listCredentialedFunds } from './db/credentials.js';
-import { lastSyncRun, listMedications } from './db/medications.js';
+import { listMedications } from './db/medications.js';
+import { listAppointments } from './db/appointments.js';
+import { lastSyncRun } from './db/sync-runs.js';
 import { describeTable, listTables, runSafeQuery } from './db/query.js';
-import { fetchFund } from './sync/fetch.js';
+import { fetchAppointmentsForFund, fetchFund } from './sync/fetch.js';
 
 /**
  * An operation is one thing an agent can ask for, declared rather than implied.
@@ -67,7 +69,7 @@ function medicationsListOperation(companyId: HealthFundId): Operation {
     async run(input) {
       const parsed = input as z.infer<typeof listMedicationsInput>;
       const items = listMedications({ companyId, ...parsed });
-      const sync = lastSyncRun(companyId);
+      const sync = lastSyncRun(companyId, 'medications');
 
       return {
         items,
@@ -99,6 +101,53 @@ function medicationsRefreshOperation(companyId: HealthFundId): Operation {
       // Classified `read`: it touches the fund's site but only reads from it, and
       // nothing about the member's account changes.
       return fetchFund(companyId);
+    },
+  };
+}
+
+function appointmentsListOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'appointments.list',
+    companyId,
+    resource: 'appointments',
+    capability: 'read',
+    scope: scope(companyId, 'appointments', 'read'),
+    title: `רשימת התורים הקרובים ב${SCRAPERS[companyId].name} מהאחסון המקומי, כולל רופא, התמחות, כתובת המרפאה והנחיות לפני ביקור. לא ניגש לאתר — הרץ appointments.refresh כדי לעדכן.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      const items = listAppointments({ companyId });
+      const sync = lastSyncRun(companyId, 'appointments');
+
+      return {
+        items,
+        lastSync: sync
+          ? {
+              at: sync.finished_at ?? sync.started_at,
+              success: sync.success === 1,
+              errorType: sync.error_type,
+            }
+          : null,
+      };
+    },
+  };
+}
+
+function appointmentsRefreshOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'appointments.refresh',
+    companyId,
+    resource: 'appointments',
+    capability: 'read',
+    scope: scope(companyId, 'appointments', 'read'),
+    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת התורים הקרובים באחסון המקומי. איטי יותר מ-medications.refresh: נכנס לעמוד הפרטים של כל תור בנפרד.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      // Kept as its own operation rather than folded into medications.refresh: this one
+      // clicks into every appointment's detail page for clinic/instructions, so it is
+      // meaningfully slower and a caller should be able to ask for one without the other.
+      return fetchAppointmentsForFund(companyId);
     },
   };
 }
@@ -151,7 +200,12 @@ const databaseOperations: Operation[] = [
 
 /** Every operation for a fund. */
 export function operationsFor(companyId: HealthFundId): Operation[] {
-  return [medicationsListOperation(companyId), medicationsRefreshOperation(companyId)];
+  return [
+    medicationsListOperation(companyId),
+    medicationsRefreshOperation(companyId),
+    appointmentsListOperation(companyId),
+    appointmentsRefreshOperation(companyId),
+  ];
 }
 
 /**

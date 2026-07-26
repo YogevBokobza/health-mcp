@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HealthFundTypes, type Medication } from 'israeli-health-scrapers';
+import { HealthFundTypes, type Appointment, type Medication } from 'israeli-health-scrapers';
 
 // The data dir and key must be set before anything opens the database.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-mcp-test-'));
@@ -14,8 +14,9 @@ const { closeDatabase, openDatabase } = await import('../../src/db/database.js')
 const { saveCredentials, getCredentials, listCredentialedFunds, deleteCredentials } = await import(
   '../../src/db/credentials.js'
 );
-const { upsertMedications, listMedications, startSyncRun, finishSyncRun, lastSyncRun } =
-  await import('../../src/db/medications.js');
+const { upsertMedications, listMedications } = await import('../../src/db/medications.js');
+const { upsertAppointments, listAppointments } = await import('../../src/db/appointments.js');
+const { startSyncRun, finishSyncRun, lastSyncRun } = await import('../../src/db/sync-runs.js');
 const { runSafeQuery } = await import('../../src/db/query.js');
 
 function medication(overrides: Partial<Medication> = {}): Medication {
@@ -29,6 +30,18 @@ function medication(overrides: Partial<Medication> = {}): Medication {
     refillsRemaining: 2,
     daysUntilExpiry: 17,
     status: 'expiring_soon',
+    provider: HealthFundTypes.maccabi,
+    ...overrides,
+  };
+}
+
+function appointment(overrides: Partial<Appointment> = {}): Appointment {
+  return {
+    id: 'abc123',
+    start: '2026-08-09T14:30:00+03:00',
+    doctorName: 'ד"ר כהן רונית',
+    specialty: 'עור | ביקור רגיל',
+    clinic: 'רחוב הדוגמה 1, עיר בדיונית',
     provider: HealthFundTypes.maccabi,
     ...overrides,
   };
@@ -131,15 +144,51 @@ describe('medications', () => {
   });
 });
 
+describe('appointments', () => {
+  it('upserts on (company, appointment id) rather than duplicating on a re-fetch', () => {
+    upsertAppointments(HealthFundTypes.maccabi, [appointment()]);
+    upsertAppointments(HealthFundTypes.maccabi, [appointment({ clinic: 'כתובת אחרת' })]);
+
+    const rows = listAppointments({ companyId: HealthFundTypes.maccabi });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.clinic).toBe('כתובת אחרת');
+  });
+
+  it('treats a different appointment id as a different booking', () => {
+    upsertAppointments(HealthFundTypes.maccabi, [appointment({ id: 'def456' })]);
+    expect(listAppointments({ companyId: HealthFundTypes.maccabi })).toHaveLength(2);
+  });
+
+  it('sorts soonest first', () => {
+    upsertAppointments(HealthFundTypes.maccabi, [
+      appointment({ id: 'sooner', start: '2026-08-01T09:00:00+03:00' }),
+    ]);
+
+    const rows = listAppointments({ companyId: HealthFundTypes.maccabi });
+    expect(rows[0]?.appointment_id).toBe('sooner');
+  });
+});
+
 describe('sync runs', () => {
   it('records a failed fetch, not just successful ones', () => {
     // "Is this data stale, or did the last fetch fail?" cannot be answered from the
     // medications table alone.
-    const id = startSyncRun(HealthFundTypes.maccabi);
+    const id = startSyncRun(HealthFundTypes.maccabi, 'medications');
     finishSyncRun(id, { success: false, errorType: 'INVALID_PASSWORD', errorMessage: 'nope' });
 
-    const run = lastSyncRun(HealthFundTypes.maccabi);
+    const run = lastSyncRun(HealthFundTypes.maccabi, 'medications');
     expect(run?.success).toBe(0);
     expect(run?.error_type).toBe('INVALID_PASSWORD');
+  });
+
+  it('keeps medications and appointments history separate for the same fund', () => {
+    const medId = startSyncRun(HealthFundTypes.maccabi, 'medications');
+    finishSyncRun(medId, { success: true, recordCount: 3 });
+
+    const apptId = startSyncRun(HealthFundTypes.maccabi, 'appointments');
+    finishSyncRun(apptId, { success: true, recordCount: 1 });
+
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'medications')?.record_count).toBe(3);
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'appointments')?.record_count).toBe(1);
   });
 });
