@@ -11,9 +11,9 @@ permissions, and the agent protocol.
 
 Nothing is sent anywhere. There is no server, no account, no telemetry.
 
-**Status:** early. Maccabi prescriptions work end to end against the local store; the
-scraper's selectors still need calibration against a live account (see the library's
-README).
+**Status:** early. Maccabi medications and appointments both work end to end against
+the local store, calibrated against a live account. Other funds are declared in the
+library but not implemented yet.
 
 ## Why not just give the agent a browser
 
@@ -114,12 +114,20 @@ Inspect it locally first with `npm run start:mcp:inspector`.
 | `auth_start` / `auth_complete` | Log in; SMS code arrives between the two calls | always available |
 | `medications_list` | Prescriptions from the local store, with `lastSync` | `<fund>:medications:read` |
 | `medications_refresh` | Log into the fund and refresh the local store | `<fund>:medications:read` |
+| `appointments_list` | Upcoming appointments from the local store, with `lastSync` | `<fund>:appointments:read` |
+| `appointments_refresh` | Log into the fund and refresh appointments (clinic address + pre-visit instructions included) | `<fund>:appointments:read` |
 | `db_listTables` | Readable tables and row counts | `local:database:read` |
 | `db_describeTable` | Columns, types, keys | `local:database:read` |
 | `db_sqlQuery` | A single read-only SELECT | `local:database:read` |
 
-`medications_list` returns `lastSync` alongside the data rather than hiding it behind
-another tool: a list of prescriptions is misleading without knowing how old it is.
+`medications_list`/`appointments_list` return `lastSync` alongside the data rather than
+hiding it behind another tool: a list is misleading without knowing how old it is.
+
+`appointments_refresh` is a separate operation rather than folded into
+`medications_refresh` or a generic "fetch everything": appointments costs meaningfully
+more, since the scraper clicks into every appointment's own detail page for its clinic
+address and pre-visit instructions — a caller asking for medications shouldn't pay for
+that.
 
 The auth tools are always listed regardless of policy — logging in is the precondition
 for everything else, and an agent that cannot see how to re-authenticate has no way to
@@ -214,6 +222,9 @@ health-mcp status
 health-mcp configure-claude
 ```
 
+`fetch`/`medications` are medications-only — appointments currently has no CLI path,
+only the `appointments_list`/`appointments_refresh` MCP tools.
+
 ## Tests
 
 ```bash
@@ -233,9 +244,10 @@ that the database file holds no plaintext. No account or network needed.
 
 ## Roadmap
 
-Appointments (list, search, book), messages to a doctor, commitment forms (טופס 17),
-background monitoring for expiring prescriptions, and the remaining funds — each
-arriving as a scraper in the library and an operation here.
+Appointments are read-only so far (list/refresh); search and booking are still open.
+Messages to a doctor, commitment forms (טופס 17), background monitoring for expiring
+prescriptions, and the remaining funds — each arriving as a scraper in the library and
+an operation here.
 
 ## License
 
