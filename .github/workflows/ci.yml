@@ -9,7 +9,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false — otherwise the checkout token is registered as a
+      # global github.com git credential, npm's fetch of the israeli-health-scrapers
+      # git dependency picks it up, gets a 403 (token is scoped to this repo only),
+      # and falls back to ssh, which the runner has no key for.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
