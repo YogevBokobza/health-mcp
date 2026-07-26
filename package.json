@@ -1,0 +1,42 @@
+{
+  "name": "health-mcp",
+  "version": "0.1.0",
+  "description": "Local-first MCP server for Israeli health fund accounts. Encrypted local storage, scoped permissions, no data leaves your machine.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "health-mcp": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cli": "tsx src/cli/index.ts",
+    "start:mcp": "tsx src/mcp/server.ts",
+    "start:mcp:inspector": "npx @modelcontextprotocol/inspector tsx src/mcp/server.ts",
+    "configure:claude": "tsx src/cli/index.ts configure-claude"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "better-sqlite3-multiple-ciphers": "^11.7.0",
+    "israeli-health-scrapers": "github:YogevBokobza/israeli-health-scrapers#claude/maccabi-account-management-d1ta5g",
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

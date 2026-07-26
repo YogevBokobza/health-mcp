@@ -1,0 +1,28 @@
+{
+  "defaultProfile": "reader",
+  "profiles": {
+    "reader": {
+      "scopes": ["*:medications:read", "local:database:read"],
+      "requireConfirmation": [],
+      "rateLimits": {}
+    },
+
+    "assistant": {
+      "scopes": [
+        "maccabi:medications:read",
+        "maccabi:appointments:read",
+        "maccabi:appointments:write",
+        "maccabi:messages:write",
+        "local:database:read"
+      ],
+      "requireConfirmation": ["*:*:write"],
+      "rateLimits": { "*:*:write": { "perHour": 5 } }
+    },
+
+    "medications-only": {
+      "scopes": ["maccabi:medications:read"],
+      "requireConfirmation": [],
+      "rateLimits": {}
+    }
+  }
+}

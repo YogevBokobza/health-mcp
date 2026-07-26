@@ -1,0 +1,13 @@
+node_modules/
+dist/
+
+# Never commit real credentials or a database.
+credentials.json
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+
+*.log
+.DS_Store
