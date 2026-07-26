@@ -1,12 +1,16 @@
 import {
   createScraper,
   ScraperErrorTypes,
+  type FetchTarget,
+  type HealthAccount,
   type HealthFundId,
   type ScraperOptions,
 } from 'israeli-health-scrapers';
 
 import { requireCredentials } from '../db/credentials.js';
-import { finishSyncRun, startSyncRun, upsertMedications } from '../db/medications.js';
+import { upsertMedications } from '../db/medications.js';
+import { upsertAppointments } from '../db/appointments.js';
+import { finishSyncRun, startSyncRun, type SyncResource } from '../db/sync-runs.js';
 import { scraperDataDir } from '../config/paths.js';
 
 export interface FetchOutcome {
@@ -18,19 +22,25 @@ export interface FetchOutcome {
 }
 
 /**
- * Fetches one fund and writes the result into the local database.
+ * Scrapes one fund for one resource and writes the result into the local database.
  *
- * Every attempt is recorded in `sync_runs`, successful or not — the question "is this
- * data stale, or did the last three fetches fail?" is exactly what a caller needs to
- * answer before trusting a `days_until_expiry`, and it cannot be answered from the
- * medications table alone.
+ * Every attempt is recorded in `sync_runs`, successful or not, per resource — the
+ * question "is this data stale, or did the last three fetches fail?" is exactly what a
+ * caller needs to answer before trusting a `days_until_expiry` or an appointment time,
+ * and it cannot be answered from the medications/appointments tables alone. Shared
+ * between fetchFund and fetchAppointmentsForFund because the only thing that differs
+ * between "refresh medications" and "refresh appointments" is which resource to ask
+ * the scraper for and where to write what comes back.
  */
-export async function fetchFund(
+async function runFetch(
   companyId: HealthFundId,
-  options: Partial<ScraperOptions> = {},
+  resource: SyncResource,
+  fetchTargets: FetchTarget[],
+  store: (companyId: HealthFundId, accounts: HealthAccount[]) => number,
+  options: Partial<ScraperOptions>,
 ): Promise<FetchOutcome> {
   const credentials = requireCredentials(companyId);
-  const runId = startSyncRun(companyId);
+  const runId = startSyncRun(companyId, resource);
 
   // Point the library's session and diagnostics storage inside our app data dir, so
   // everything this tool owns lives in one place the user can find and delete.
@@ -39,7 +49,7 @@ export async function fetchFund(
   const scraper = createScraper({
     companyId,
     storeSession: true,
-    fetch: ['medications'],
+    fetch: fetchTargets,
     ...options,
   });
 
@@ -71,12 +81,44 @@ export async function fetchFund(
     };
   }
 
-  const medications = result.accounts?.flatMap((account) => account.medications) ?? [];
-  const recordCount = upsertMedications(companyId, medications);
+  const recordCount = store(companyId, result.accounts ?? []);
 
   finishSyncRun(runId, { success: true, recordCount });
 
   return { companyId, success: true, recordCount };
+}
+
+export async function fetchFund(
+  companyId: HealthFundId,
+  options: Partial<ScraperOptions> = {},
+): Promise<FetchOutcome> {
+  return runFetch(
+    companyId,
+    'medications',
+    ['medications'],
+    (id, accounts) => upsertMedications(id, accounts.flatMap((account) => account.medications)),
+    options,
+  );
+}
+
+/**
+ * Refreshes appointments only — kept separate from fetchFund rather than folded into
+ * one "fetch everything" call, because appointments costs a lot more: the list view
+ * has no clinic/location or instructions, so the scraper clicks into every single
+ * appointment's detail page to get them. A caller that only wants medications should
+ * not pay for that on every refresh.
+ */
+export async function fetchAppointmentsForFund(
+  companyId: HealthFundId,
+  options: Partial<ScraperOptions> = {},
+): Promise<FetchOutcome> {
+  return runFetch(
+    companyId,
+    'appointments',
+    ['appointments'],
+    (id, accounts) => upsertAppointments(id, accounts.flatMap((account) => account.appointments ?? [])),
+    options,
+  );
 }
 
 /**

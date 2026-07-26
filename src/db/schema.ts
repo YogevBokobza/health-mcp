@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -54,10 +54,32 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_medications_status ON medications (status)`,
   `CREATE INDEX IF NOT EXISTS idx_medications_expiry ON medications (days_until_expiry)`,
 
-  /** One row per fetch attempt, successful or not. */
+  /**
+   * Upcoming appointments. Keyed by (company_id, appointment_id) — the scraper's id is
+   * already stable across re-fetches of the same booking, so this answers "what's on
+   * the calendar" rather than accumulating a copy of the same appointment per fetch.
+   */
+  `CREATE TABLE IF NOT EXISTS appointments (
+     id             INTEGER PRIMARY KEY AUTOINCREMENT,
+     company_id     TEXT NOT NULL,
+     appointment_id TEXT NOT NULL,
+     start          TEXT NOT NULL,
+     doctor_name    TEXT,
+     specialty      TEXT,
+     clinic         TEXT,
+     raw            TEXT,
+     first_seen_at  TEXT NOT NULL,
+     updated_at     TEXT NOT NULL,
+     UNIQUE (company_id, appointment_id)
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_appointments_start ON appointments (start)`,
+
+  /** One row per fetch attempt, successful or not — one history per fund per resource. */
   `CREATE TABLE IF NOT EXISTS sync_runs (
      id            INTEGER PRIMARY KEY AUTOINCREMENT,
      company_id    TEXT NOT NULL,
+     resource      TEXT NOT NULL DEFAULT 'medications',
      started_at    TEXT NOT NULL,
      finished_at   TEXT,
      success       INTEGER NOT NULL DEFAULT 0,
@@ -67,8 +89,19 @@ const STATEMENTS = [
    )`,
 ];
 
+/**
+ * Columns added after a table's first release, applied to installs that already have
+ * the table without them. `CREATE TABLE IF NOT EXISTS` above only covers a table that
+ * doesn't exist yet — an existing sync_runs from schema v1 needs this to gain `resource`.
+ */
+function addColumnIfMissing(db: Database, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 /** Tables an agent may read through `sqlQuery`. */
-export const READABLE_TABLES = ['medications', 'sync_runs'] as const;
+export const READABLE_TABLES = ['medications', 'appointments', 'sync_runs'] as const;
 
 /**
  * Never readable through `sqlQuery`, whatever the policy grants.
@@ -83,6 +116,8 @@ export function migrate(db: Database): void {
   db.exec('BEGIN');
   try {
     for (const statement of STATEMENTS) db.exec(statement);
+
+    addColumnIfMissing(db, 'sync_runs', 'resource', "TEXT NOT NULL DEFAULT 'medications'");
 
     const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as
       | { version: number }
