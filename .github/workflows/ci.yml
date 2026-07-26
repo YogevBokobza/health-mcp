@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: false — otherwise the checkout token is registered as a
+      # global github.com git credential, npm's fetch of the israeli-health-scrapers
+      # git dependency picks it up, gets a 403 (token is scoped to this repo only),
+      # and falls back to ssh, which the runner has no key for.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # israeli-health-scrapers is a git dependency built via its own `prepare`
+      # script (needs a real git checkout, not the npm cache) — plain `npm ci` covers it.
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
