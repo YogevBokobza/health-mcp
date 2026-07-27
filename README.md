@@ -247,7 +247,7 @@ that the database file holds no plaintext. No account or network needed.
 Appointments are read-only so far (list/refresh); search and booking are still open.
 Messages to a doctor, commitment forms (טופס 17), background monitoring for expiring
 prescriptions, and the remaining funds — each arriving as a scraper in the library and
-an operation here.
+an operation here. Full ordered plan, resource by resource: [docs/roadmap.md](docs/roadmap.md).
 
 ## License
 
