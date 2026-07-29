@@ -8,7 +8,7 @@ import {
 } from 'israeli-health-scrapers';
 
 import { requireCredentials } from '../db/credentials.js';
-import { upsertMedications } from '../db/medications.js';
+import { replaceMedicationsSnapshot } from '../db/medications.js';
 import { upsertAppointments } from '../db/appointments.js';
 import { upsertTestResults } from '../db/test-results.js';
 import { finishSyncRun, startSyncRun, type SyncResource } from '../db/sync-runs.js';
@@ -106,7 +106,8 @@ export async function fetchFund(
     companyId,
     'medications',
     ['medications'],
-    (id, accounts) => upsertMedications(id, accounts.flatMap((account) => account.medications)),
+    (id, accounts) =>
+      replaceMedicationsSnapshot(id, accounts.flatMap((account) => account.medications)),
     options,
   );
 }
