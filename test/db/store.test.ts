@@ -1,8 +1,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HealthFundTypes, type Appointment, type Medication } from 'israeli-health-scrapers';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  HealthFundTypes,
+  type Appointment,
+  type Medication,
+  type TestResult,
+} from 'israeli-health-scrapers';
 
 // The data dir and key must be set before anything opens the database.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-mcp-test-'));
@@ -17,7 +22,9 @@ const { saveCredentials, getCredentials, listCredentialedFunds, deleteCredential
 const { upsertMedications, listMedications } = await import('../../src/db/medications.js');
 const { upsertAppointments, listAppointments } = await import('../../src/db/appointments.js');
 const { startSyncRun, finishSyncRun, lastSyncRun } = await import('../../src/db/sync-runs.js');
-const { runSafeQuery } = await import('../../src/db/query.js');
+const { runSafeQuery, listTables, describeTable } = await import('../../src/db/query.js');
+const { upsertTestResults, listTestResults } = await import('../../src/db/test-results.js');
+const { operationsFor } = await import('../../src/operations.js');
 
 function medication(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -47,6 +54,20 @@ function appointment(overrides: Partial<Appointment> = {}): Appointment {
   };
 }
 
+const fictionalTestResultName = 'בדיקת אבק כוכבים בדיונית';
+
+function testResult(overrides: Partial<TestResult> = {}): TestResult {
+  return {
+    id: 'fictional-result-001',
+    testName: fictionalTestResultName,
+    performedOn: '2026-07-14',
+    orderingDoctor: 'ד"ר דמיון בלבד',
+    provider: HealthFundTypes.maccabi,
+    raw: { fictionalTimelineLabel: 'nebula-alpha' },
+    ...overrides,
+  };
+}
+
 beforeAll(() => {
   openDatabase();
 });
@@ -57,7 +78,9 @@ afterAll(() => {
 });
 
 describe('database', () => {
-  it('creates the file with owner-only permissions', () => {
+  it('creates the file with owner-only permissions where POSIX modes are supported', () => {
+    if (process.platform === 'win32') return;
+
     const mode = fs.statSync(path.join(tempDir, 'database.db')).mode & 0o777;
     // Medical records: readable by this user and nobody else.
     expect(mode).toBe(0o600);
@@ -70,6 +93,16 @@ describe('database', () => {
     const raw = fs.readFileSync(path.join(tempDir, 'database.db'));
     expect(raw.includes(Buffer.from('hunter2'))).toBe(false);
     expect(raw.includes(Buffer.from('123456782'))).toBe(false);
+
+    openDatabase();
+  });
+
+  it('does not store the fictional test-result name in plaintext on disk', () => {
+    upsertTestResults(HealthFundTypes.maccabi, [testResult()]);
+    closeDatabase();
+
+    const raw = fs.readFileSync(path.join(tempDir, 'database.db'));
+    expect(raw.includes(Buffer.from(fictionalTestResultName))).toBe(false);
 
     openDatabase();
   });
@@ -169,6 +202,111 @@ describe('appointments', () => {
   });
 });
 
+describe('test results', () => {
+  beforeEach(() => {
+    openDatabase().prepare('DELETE FROM test_results').run();
+  });
+
+  afterEach(() => {
+    openDatabase().prepare('DELETE FROM test_results').run();
+  });
+
+  it('upserts on (company, test result id) and updates mapped fields and raw', () => {
+    upsertTestResults(HealthFundTypes.maccabi, [testResult()]);
+    upsertTestResults(HealthFundTypes.maccabi, [
+      testResult({
+        testName: 'בדיקת ירח בדיונית מעודכנת',
+        performedOn: '2026-07-21',
+        orderingDoctor: 'ד"ר אגדה בלבד',
+        raw: { fictionalTimelineLabel: 'nebula-beta' },
+      }),
+    ]);
+
+    const rows = listTestResults({ companyId: HealthFundTypes.maccabi });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      test_result_id: 'fictional-result-001',
+      test_name: 'בדיקת ירח בדיונית מעודכנת',
+      performed_on: '2026-07-21',
+      ordering_doctor: 'ד"ר אגדה בלבד',
+    });
+    expect(JSON.parse(rows[0]!.raw!)).toEqual({ fictionalTimelineLabel: 'nebula-beta' });
+  });
+
+  it('preserves first_seen_at across an update', () => {
+    upsertTestResults(HealthFundTypes.maccabi, [testResult()]);
+    const before = listTestResults({ companyId: HealthFundTypes.maccabi })
+      .find((row) => row.test_result_id === 'fictional-result-001')!.first_seen_at;
+
+    upsertTestResults(HealthFundTypes.maccabi, [testResult({ testName: 'שם בדיוני נוסף' })]);
+
+    const after = listTestResults({ companyId: HealthFundTypes.maccabi })
+      .find((row) => row.test_result_id === 'fictional-result-001')!.first_seen_at;
+    expect(after).toBe(before);
+  });
+
+  it('treats a different test result id as a distinct timeline entry', () => {
+    upsertTestResults(HealthFundTypes.maccabi, [
+      testResult(),
+      testResult({ id: 'fictional-result-002', testName: 'בדיקת שביט בדיונית' }),
+    ]);
+
+    expect(listTestResults({ companyId: HealthFundTypes.maccabi })).toHaveLength(2);
+  });
+
+  it('sorts newest performed date first and unknown dates last', () => {
+    upsertTestResults(HealthFundTypes.maccabi, [
+      testResult({
+        id: 'fictional-result-003',
+        testName: 'בדיקת ערפילית בדיונית',
+        performedOn: null,
+      }),
+      testResult({
+        id: 'fictional-result-004',
+        testName: 'בדיקת מטאור בדיונית',
+        performedOn: '2026-07-28',
+      }),
+    ]);
+
+    const rows = listTestResults({ companyId: HealthFundTypes.maccabi });
+    expect(rows[0]?.test_result_id).toBe('fictional-result-004');
+    expect(rows.at(-1)?.test_result_id).toBe('fictional-result-003');
+  });
+
+  it('is exposed through table discovery and safe SQL querying', () => {
+    upsertTestResults(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-query-result', testName: 'בדיקת שאילתה בדיונית' }),
+    ]);
+
+    expect(listTables()).toContainEqual({ name: 'test_results', rowCount: 1 });
+
+    const table = describeTable('test_results');
+    expect(table.columns.map((column) => column.name)).toEqual([
+      'id',
+      'company_id',
+      'test_result_id',
+      'test_name',
+      'performed_on',
+      'ordering_doctor',
+      'raw',
+      'first_seen_at',
+      'updated_at',
+    ]);
+
+    const result = runSafeQuery(
+      'SELECT test_result_id, test_name FROM test_results WHERE company_id = ?',
+      [HealthFundTypes.maccabi],
+    );
+    expect(result.rowCount).toBe(1);
+    expect(result.rows).toEqual([
+      {
+        test_result_id: 'fictional-query-result',
+        test_name: 'בדיקת שאילתה בדיונית',
+      },
+    ]);
+  });
+});
+
 describe('sync runs', () => {
   it('records a failed fetch, not just successful ones', () => {
     // "Is this data stale, or did the last fetch fail?" cannot be answered from the
@@ -190,5 +328,66 @@ describe('sync runs', () => {
 
     expect(lastSyncRun(HealthFundTypes.maccabi, 'medications')?.record_count).toBe(3);
     expect(lastSyncRun(HealthFundTypes.maccabi, 'appointments')?.record_count).toBe(1);
+  });
+
+  it('keeps test-result freshness isolated and returns it from the production list operation', async () => {
+    const db = openDatabase();
+    const testResultId = 'fictional-task-3-freshness-result-only';
+    const syncRunIds: number[] = [];
+
+    try {
+      upsertTestResults(HealthFundTypes.maccabi, [
+        testResult({ id: testResultId, testName: 'בדיקת רעננות בדיונית' }),
+      ]);
+
+      const medicationRunId = startSyncRun(HealthFundTypes.maccabi, 'medications');
+      syncRunIds.push(medicationRunId);
+      finishSyncRun(medicationRunId, { success: false, errorType: 'FICTIONAL_MEDICATION_ERROR' });
+
+      const appointmentRunId = startSyncRun(HealthFundTypes.maccabi, 'appointments');
+      syncRunIds.push(appointmentRunId);
+      finishSyncRun(appointmentRunId, { success: true, recordCount: 7 });
+
+      const testResultRunId = startSyncRun(HealthFundTypes.maccabi, 'testResults');
+      syncRunIds.push(testResultRunId);
+      finishSyncRun(testResultRunId, { success: true, recordCount: 1 });
+
+      const medicationSync = lastSyncRun(HealthFundTypes.maccabi, 'medications');
+      const appointmentSync = lastSyncRun(HealthFundTypes.maccabi, 'appointments');
+      const testResultSync = lastSyncRun(HealthFundTypes.maccabi, 'testResults');
+
+      expect(medicationSync).toMatchObject({ success: 0, error_type: 'FICTIONAL_MEDICATION_ERROR' });
+      expect(appointmentSync).toMatchObject({ success: 1, record_count: 7 });
+      expect(testResultSync).toMatchObject({ success: 1, record_count: 1 });
+
+      const listOperation = operationsFor(HealthFundTypes.maccabi).find(
+        (operation) => operation.name === 'testResults.list',
+      );
+      expect(listOperation).toBeDefined();
+
+      const result = (await listOperation!.run({})) as {
+        items: { company_id: string; test_result_id: string; test_name: string }[];
+        lastSync: { at: string; success: boolean; errorType: string | null } | null;
+      };
+      expect(result.items).toContainEqual(
+        expect.objectContaining({
+          company_id: HealthFundTypes.maccabi,
+          test_result_id: testResultId,
+          test_name: 'בדיקת רעננות בדיונית',
+        }),
+      );
+      expect(result.lastSync).toEqual({
+        at: testResultSync!.finished_at,
+        success: true,
+        errorType: null,
+      });
+    } finally {
+      db.prepare('DELETE FROM test_results WHERE company_id = ? AND test_result_id = ?').run(
+        HealthFundTypes.maccabi,
+        testResultId,
+      );
+      const deleteSyncRun = db.prepare('DELETE FROM sync_runs WHERE id = ?');
+      for (const id of syncRunIds) deleteSyncRun.run(id);
+    }
   });
 });

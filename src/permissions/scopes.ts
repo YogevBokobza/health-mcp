@@ -18,6 +18,7 @@ export type Capability = 'read' | 'write';
 export type Resource =
   | 'medications'
   | 'appointments'
+  | 'testResults'
   | 'messages'
   | 'commitments'
   /** The local store itself, reachable without naming a fund. */

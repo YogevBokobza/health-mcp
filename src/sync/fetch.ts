@@ -10,6 +10,7 @@ import {
 import { requireCredentials } from '../db/credentials.js';
 import { upsertMedications } from '../db/medications.js';
 import { upsertAppointments } from '../db/appointments.js';
+import { upsertTestResults } from '../db/test-results.js';
 import { finishSyncRun, startSyncRun, type SyncResource } from '../db/sync-runs.js';
 import { scraperDataDir } from '../config/paths.js';
 
@@ -42,50 +43,59 @@ async function runFetch(
   const credentials = requireCredentials(companyId);
   const runId = startSyncRun(companyId, resource);
 
-  // Point the library's session and diagnostics storage inside our app data dir, so
-  // everything this tool owns lives in one place the user can find and delete.
-  process.env.IHS_DATA_DIR ??= scraperDataDir();
+  try {
+    // Point the library's session and diagnostics storage inside our app data dir, so
+    // everything this tool owns lives in one place the user can find and delete.
+    process.env.IHS_DATA_DIR ??= scraperDataDir();
 
-  const scraper = createScraper({
-    companyId,
-    storeSession: true,
-    fetch: fetchTargets,
-    ...options,
-  });
-
-  const result = await scraper.scrape(credentials);
-
-  if (!result.success) {
-    // fetch deliberately never carries an otpCodeRetriever — it runs unattended. This
-    // exact errorType is what "the stored session no longer works" looks like: it
-    // expired, or the member logged in elsewhere and the fund invalidated it. The
-    // library's message talks about otpCodeRetriever, which means nothing to a member
-    // deciding what to do next.
-    const errorMessage =
-      result.errorType === ScraperErrorTypes.TwoFactorRetrieverMissing
-        ? `Session expired or you logged in elsewhere. Run: health-mcp login ${companyId}`
-        : result.errorMessage;
-
-    finishSyncRun(runId, {
-      success: false,
-      errorType: result.errorType,
-      errorMessage,
+    const scraper = createScraper({
+      ...options,
+      companyId,
+      storeSession: true,
+      fetch: fetchTargets,
     });
 
-    return {
-      companyId,
+    const result = await scraper.scrape(credentials);
+
+    if (!result.success) {
+      // fetch deliberately never carries an otpCodeRetriever — it runs unattended. This
+      // exact errorType is what "the stored session no longer works" looks like: it
+      // expired, or the member logged in elsewhere and the fund invalidated it. The
+      // library's message talks about otpCodeRetriever, which means nothing to a member
+      // deciding what to do next.
+      const errorMessage =
+        result.errorType === ScraperErrorTypes.TwoFactorRetrieverMissing
+          ? `Session expired or you logged in elsewhere. Run: health-mcp login ${companyId}`
+          : result.errorMessage;
+
+      finishSyncRun(runId, {
+        success: false,
+        errorType: result.errorType,
+        errorMessage,
+      });
+
+      return {
+        companyId,
+        success: false,
+        recordCount: 0,
+        errorType: result.errorType,
+        errorMessage,
+      };
+    }
+
+    const recordCount = store(companyId, result.accounts ?? []);
+
+    finishSyncRun(runId, { success: true, recordCount });
+
+    return { companyId, success: true, recordCount };
+  } catch (error) {
+    finishSyncRun(runId, {
       success: false,
-      recordCount: 0,
-      errorType: result.errorType,
-      errorMessage,
-    };
+      errorType: ScraperErrorTypes.General,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-
-  const recordCount = store(companyId, result.accounts ?? []);
-
-  finishSyncRun(runId, { success: true, recordCount });
-
-  return { companyId, success: true, recordCount };
 }
 
 export async function fetchFund(
@@ -117,6 +127,19 @@ export async function fetchAppointmentsForFund(
     'appointments',
     ['appointments'],
     (id, accounts) => upsertAppointments(id, accounts.flatMap((account) => account.appointments ?? [])),
+    options,
+  );
+}
+
+export async function fetchTestResultsForFund(
+  companyId: HealthFundId,
+  options: Partial<ScraperOptions> = {},
+): Promise<FetchOutcome> {
+  return runFetch(
+    companyId,
+    'testResults',
+    ['testResults'],
+    (id, accounts) => upsertTestResults(id, accounts.flatMap((account) => account.testResults ?? [])),
     options,
   );
 }
