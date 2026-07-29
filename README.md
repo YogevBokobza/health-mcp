@@ -11,8 +11,8 @@ permissions, and the agent protocol.
 
 Nothing is sent anywhere. There is no server, no account, no telemetry.
 
-**Status:** early. Maccabi medications and appointments both work end to end against
-the local store, calibrated against a live account. Other funds are declared in the
+**Status:** early. Maccabi medications, appointments, and test results work end to end
+against the local store, calibrated against a live account. Other funds are declared in the
 library but not implemented yet.
 
 ## Why not just give the agent a browser
@@ -75,6 +75,8 @@ CAPTCHA or a consent screen shows up, and those need a human looking at the page
 ```bash
 health-mcp fetch
 health-mcp medications
+health-mcp fetch-test-results maccabi
+health-mcp test-results maccabi
 ```
 
 ## Connect to Claude
@@ -116,12 +118,18 @@ Inspect it locally first with `npm run start:mcp:inspector`.
 | `medications_refresh` | Log into the fund and refresh the local store | `<fund>:medications:read` |
 | `appointments_list` | Upcoming appointments from the local store, with `lastSync` | `<fund>:appointments:read` |
 | `appointments_refresh` | Log into the fund and refresh appointments (clinic address + pre-visit instructions included) | `<fund>:appointments:read` |
+| `testResults_list` | Test results from the local store, with `lastSync` | `<fund>:testResults:read` |
+| `testResults_refresh` | Log into the fund and refresh test results | `<fund>:testResults:read` |
 | `db_listTables` | Readable tables and row counts | `local:database:read` |
 | `db_describeTable` | Columns, types, keys | `local:database:read` |
 | `db_sqlQuery` | A single read-only SELECT | `local:database:read` |
 
-`medications_list`/`appointments_list` return `lastSync` alongside the data rather than
-hiding it behind another tool: a list is misleading without knowing how old it is.
+`medications_list`/`appointments_list`/`testResults_list` return `lastSync` alongside the
+data rather than hiding it behind another tool: a list is misleading without knowing how
+old it is. `lastSync.at` is the most recent attempt's completion time (or start time if it
+is still running), `success` says whether that attempt succeeded, and `errorType` records
+why the attempt failed when available. Listing is local-only; use the matching `refresh`
+operation to fetch newer results.
 
 `appointments_refresh` is a separate operation rather than folded into
 `medications_refresh` or a generic "fetch everything": appointments costs meaningfully
@@ -218,12 +226,17 @@ health-mcp remove-creds maccabi
 health-mcp login maccabi [--headless]
 health-mcp fetch [fund...]
 health-mcp medications [fund]
+health-mcp fetch-test-results [fund]
+health-mcp test-results [fund]
 health-mcp status
 health-mcp configure-claude
 ```
 
-`fetch`/`medications` are medications-only — appointments currently has no CLI path,
-only the `appointments_list`/`appointments_refresh` MCP tools.
+`fetch-test-results [fund]` fetches and stores test results for one fund (defaulting to
+Maccabi), while `test-results [fund]` prints the locally stored results newest first. The
+MCP `testResults_list`/`testResults_refresh` tools provide the same local-list/remote-refresh
+split for agents. Appointments currently has no CLI path; use the
+`appointments_list`/`appointments_refresh` MCP tools.
 
 ## Tests
 
