@@ -6,12 +6,14 @@ import { listCredentialedFunds } from './db/credentials.js';
 import { listMedications } from './db/medications.js';
 import { listAppointments } from './db/appointments.js';
 import { listTestResults } from './db/test-results.js';
+import { listVaccinations } from './db/vaccinations.js';
 import { lastSyncRun } from './db/sync-runs.js';
 import { describeTable, listTables, runSafeQuery } from './db/query.js';
 import {
   fetchAppointmentsForFund,
   fetchFund,
   fetchTestResultsForFund,
+  fetchVaccinationsForFund,
 } from './sync/fetch.js';
 
 /**
@@ -201,6 +203,49 @@ function testResultsRefreshOperation(companyId: HealthFundId): Operation {
   };
 }
 
+function vaccinationsListOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'vaccinations.list',
+    companyId,
+    resource: 'vaccinations',
+    capability: 'read',
+    scope: scope(companyId, 'vaccinations', 'read'),
+    title: `רשימת החיסונים ב${SCRAPERS[companyId].name} מהאחסון המקומי, כולל תאריך, מנה ומיקום. לא ניגש לאתר — הרץ vaccinations.refresh כדי לעדכן.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      const items = listVaccinations({ companyId });
+      const sync = lastSyncRun(companyId, 'vaccinations');
+      return {
+        items,
+        lastSync: sync
+          ? {
+              at: sync.finished_at ?? sync.started_at,
+              success: sync.success === 1,
+              errorType: sync.error_type,
+            }
+          : null,
+      };
+    },
+  };
+}
+
+function vaccinationsRefreshOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'vaccinations.refresh',
+    companyId,
+    resource: 'vaccinations',
+    capability: 'read',
+    scope: scope(companyId, 'vaccinations', 'read'),
+    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת החיסונים באחסון המקומי.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      return fetchVaccinationsForFund(companyId);
+    },
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Database operations, following asher-mcp's shape                            */
 /* -------------------------------------------------------------------------- */
@@ -256,6 +301,8 @@ export function operationsFor(companyId: HealthFundId): Operation[] {
     appointmentsRefreshOperation(companyId),
     testResultsListOperation(companyId),
     testResultsRefreshOperation(companyId),
+    vaccinationsListOperation(companyId),
+    vaccinationsRefreshOperation(companyId),
   ];
 }
 

@@ -20,11 +20,12 @@ Do these first, one at a time, live-calibrated the same way appointments was:
 guess selectors → run against the real account → fix from the diagnostics
 dump in `data/diagnostics/`, never guess blind.
 
-- **testResults** — `TestsResults/lobby/` (list) and `TestsResults/latest/`.
-  Likely list-only, no per-row detail page needed; confirm against the real
-  DOM before assuming that.
-- **vaccinations** — `Vaccinations/Lobby/`. List-only.
-- **pastVisits** — `PastVisits/Lobby/`. List-only.
+- **testResults** — complete. `TestsResults/lobby/` (list) and
+  `TestsResults/latest/`; shipped as a list-only resource.
+- **vaccinations** — in progress. `Vaccinations/Lobby/`; the Health-MCP
+  storage and access layer is implemented, but live calibration and the remote
+  scraper dependency lock remain pending.
+- **pastVisits** — next after vaccinations completes. `PastVisits/Lobby/`. List-only.
 - **visitSummaries** — `VisitSummary/Lobby/`. May need a per-row detail click
   for the full summary text, same pattern as appointments' clinic/instructions
   — check the list view first before assuming a detail page is needed.

@@ -19,6 +19,7 @@ export type Resource =
   | 'medications'
   | 'appointments'
   | 'testResults'
+  | 'vaccinations'
   | 'messages'
   | 'commitments'
   /** The local store itself, reachable without naming a fund. */

@@ -21,7 +21,7 @@ function policy(scopes: string[]): ResolvedPolicy {
 }
 
 describe('test-result operations', () => {
-  it('registers exactly the six supported Maccabi resource operations', () => {
+  it('registers exactly the eight supported Maccabi resource operations', () => {
     expect(maccabiOperations.map((operation) => operation.name)).toEqual([
       'medications.list',
       'medications.refresh',
@@ -29,6 +29,8 @@ describe('test-result operations', () => {
       'appointments.refresh',
       'testResults.list',
       'testResults.refresh',
+      'vaccinations.list',
+      'vaccinations.refresh',
     ]);
   });
 
@@ -74,6 +76,32 @@ describe('test-result operations', () => {
         .visibleOperations(maccabiOperations)
         .some((operation) => operation.resource === 'testResults'),
     ).toBe(false);
+  });
+
+  it('classifies and discovers vaccination operations as scoped reads', () => {
+    const vaccinationOperations = maccabiOperations.filter(
+      (operation) => operation.resource === 'vaccinations',
+    );
+    expect(vaccinationOperations.map(({ name, capability, scope }) => ({ name, capability, scope }))).toEqual([
+      { name: 'vaccinations.list', capability: 'read', scope: 'maccabi:vaccinations:read' },
+      { name: 'vaccinations.refresh', capability: 'read', scope: 'maccabi:vaccinations:read' },
+    ]);
+
+    const grant = new PermissionEngine(policy(['maccabi:vaccinations:read']));
+    expect(grant.visibleOperations(maccabiOperations).map((operation) => operation.name)).toEqual([
+      'vaccinations.list',
+      'vaccinations.refresh',
+    ]);
+  });
+
+  it('uses stable unqualified and fund-qualified vaccination tool names', () => {
+    const list = maccabiOperations.find((operation) => operation.name === 'vaccinations.list')!;
+    const refresh = maccabiOperations.find((operation) => operation.name === 'vaccinations.refresh')!;
+
+    expect(toolNameFor(list, false)).toBe('vaccinations_list');
+    expect(toolNameFor(refresh, false)).toBe('vaccinations_refresh');
+    expect(toolNameFor(list, true)).toBe('maccabi_vaccinations_list');
+    expect(toolNameFor(refresh, true)).toBe('maccabi_vaccinations_refresh');
   });
 
   it('uses stable unqualified and fund-qualified tool names', () => {

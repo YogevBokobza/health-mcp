@@ -11,11 +11,13 @@ export { saveCredentials, getCredentials, listCredentialedFunds } from './db/cre
 export { listMedications } from './db/medications.js';
 export { listAppointments } from './db/appointments.js';
 export { listTestResults } from './db/test-results.js';
+export { upsertVaccinations, listVaccinations } from './db/vaccinations.js';
 export { startSyncRun, finishSyncRun, lastSyncRun } from './db/sync-runs.js';
 export { runSafeQuery, assertSafeSelect, listTables, describeTable, UnsafeQueryError } from './db/query.js';
 export type { StoredMedication } from './db/medications.js';
 export type { StoredAppointment } from './db/appointments.js';
 export type { StoredTestResult } from './db/test-results.js';
+export type { StoredVaccination } from './db/vaccinations.js';
 export type { SyncRun, SyncResource } from './db/sync-runs.js';
 
 export {
@@ -23,6 +25,7 @@ export {
   fetchFunds,
   fetchAppointmentsForFund,
   fetchTestResultsForFund,
+  fetchVaccinationsForFund,
 } from './sync/fetch.js';
 export type { FetchOutcome } from './sync/fetch.js';
 
