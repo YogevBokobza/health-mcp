@@ -11,6 +11,7 @@ import { requireCredentials } from '../db/credentials.js';
 import { replaceMedicationsSnapshot } from '../db/medications.js';
 import { upsertAppointments } from '../db/appointments.js';
 import { upsertTestResults } from '../db/test-results.js';
+import { upsertVaccinations } from '../db/vaccinations.js';
 import { finishSyncRun, startSyncRun, type SyncResource } from '../db/sync-runs.js';
 import { scraperDataDir } from '../config/paths.js';
 
@@ -141,6 +142,19 @@ export async function fetchTestResultsForFund(
     'testResults',
     ['testResults'],
     (id, accounts) => upsertTestResults(id, accounts.flatMap((account) => account.testResults ?? [])),
+    options,
+  );
+}
+
+export async function fetchVaccinationsForFund(
+  companyId: HealthFundId,
+  options: Partial<ScraperOptions> = {},
+): Promise<FetchOutcome> {
+  return runFetch(
+    companyId,
+    'vaccinations',
+    ['vaccinations'],
+    (id, accounts) => upsertVaccinations(id, accounts.flatMap((account) => account.vaccinations ?? [])),
     options,
   );
 }
