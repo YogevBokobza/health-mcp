@@ -5,9 +5,14 @@ import { scope, type Capability, type Resource, type Scope } from './permissions
 import { listCredentialedFunds } from './db/credentials.js';
 import { listMedications } from './db/medications.js';
 import { listAppointments } from './db/appointments.js';
+import { listTestResults } from './db/test-results.js';
 import { lastSyncRun } from './db/sync-runs.js';
 import { describeTable, listTables, runSafeQuery } from './db/query.js';
-import { fetchAppointmentsForFund, fetchFund } from './sync/fetch.js';
+import {
+  fetchAppointmentsForFund,
+  fetchFund,
+  fetchTestResultsForFund,
+} from './sync/fetch.js';
 
 /**
  * An operation is one thing an agent can ask for, declared rather than implied.
@@ -152,6 +157,50 @@ function appointmentsRefreshOperation(companyId: HealthFundId): Operation {
   };
 }
 
+function testResultsListOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'testResults.list',
+    companyId,
+    resource: 'testResults',
+    capability: 'read',
+    scope: scope(companyId, 'testResults', 'read'),
+    title: `רשימת רשומות בדיקות ב${SCRAPERS[companyId].name} מהאחסון המקומי, כולל שם הבדיקה, מועד הביצוע והרופא המפנה כשזמינים. לא ניגש לאתר — הרץ testResults.refresh כדי לעדכן.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      const items = listTestResults({ companyId });
+      const sync = lastSyncRun(companyId, 'testResults');
+
+      return {
+        items,
+        lastSync: sync
+          ? {
+              at: sync.finished_at ?? sync.started_at,
+              success: sync.success === 1,
+              errorType: sync.error_type,
+            }
+          : null,
+      };
+    },
+  };
+}
+
+function testResultsRefreshOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'testResults.refresh',
+    companyId,
+    resource: 'testResults',
+    capability: 'read',
+    scope: scope(companyId, 'testResults', 'read'),
+    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת רשומות הבדיקות באחסון המקומי.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      return fetchTestResultsForFund(companyId);
+    },
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Database operations, following asher-mcp's shape                            */
 /* -------------------------------------------------------------------------- */
@@ -184,7 +233,7 @@ const databaseOperations: Operation[] = [
     capability: 'read',
     scope: 'local:database:read',
     title:
-      'שאילתת SELECT בלבד על האחסון המקומי. שימושי לשאלות מורכבות על התרופות שאין להן כלי ייעודי.',
+      'שאילתת SELECT בלבד על המידע הרפואי באחסון המקומי. שימושי לשאלות מורכבות שאין להן כלי ייעודי.',
     input: z.object({
       sql: z.string().describe('A single read-only SELECT statement.'),
       params: z.array(z.union([z.string(), z.number(), z.null()])).default([]),
@@ -205,6 +254,8 @@ export function operationsFor(companyId: HealthFundId): Operation[] {
     medicationsRefreshOperation(companyId),
     appointmentsListOperation(companyId),
     appointmentsRefreshOperation(companyId),
+    testResultsListOperation(companyId),
+    testResultsRefreshOperation(companyId),
   ];
 }
 

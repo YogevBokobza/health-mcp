@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -75,6 +75,21 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS idx_appointments_start ON appointments (start)`,
 
+  `CREATE TABLE IF NOT EXISTS test_results (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     company_id      TEXT NOT NULL,
+     test_result_id  TEXT NOT NULL,
+     test_name       TEXT NOT NULL,
+     performed_on    TEXT,
+     ordering_doctor TEXT,
+     raw              TEXT,
+     first_seen_at    TEXT NOT NULL,
+     updated_at       TEXT NOT NULL,
+     UNIQUE (company_id, test_result_id)
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_test_results_performed_on ON test_results (performed_on)`,
+
   /** One row per fetch attempt, successful or not — one history per fund per resource. */
   `CREATE TABLE IF NOT EXISTS sync_runs (
      id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,7 +116,12 @@ function addColumnIfMissing(db: Database, table: string, column: string, definit
 }
 
 /** Tables an agent may read through `sqlQuery`. */
-export const READABLE_TABLES = ['medications', 'appointments', 'sync_runs'] as const;
+export const READABLE_TABLES = [
+  'medications',
+  'appointments',
+  'test_results',
+  'sync_runs',
+] as const;
 
 /**
  * Never readable through `sqlQuery`, whatever the policy grants.
