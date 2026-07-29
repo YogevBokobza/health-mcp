@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -90,6 +90,22 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS idx_test_results_performed_on ON test_results (performed_on)`,
 
+  `CREATE TABLE IF NOT EXISTS vaccinations (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     company_id      TEXT NOT NULL,
+     vaccination_id  TEXT NOT NULL,
+     vaccine_name    TEXT NOT NULL,
+     administered_on TEXT NOT NULL,
+     dose             TEXT,
+     location         TEXT,
+     raw              TEXT,
+     first_seen_at    TEXT NOT NULL,
+     updated_at       TEXT NOT NULL,
+     UNIQUE (company_id, vaccination_id)
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_vaccinations_administered_on ON vaccinations (administered_on)`,
+
   /** One row per fetch attempt, successful or not — one history per fund per resource. */
   `CREATE TABLE IF NOT EXISTS sync_runs (
      id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +136,7 @@ export const READABLE_TABLES = [
   'medications',
   'appointments',
   'test_results',
+  'vaccinations',
   'sync_runs',
 ] as const;
 

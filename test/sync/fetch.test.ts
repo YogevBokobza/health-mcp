@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Medication, ScraperOptions, TestResult } from 'israeli-health-scrapers';
+import type { Medication, ScraperOptions, TestResult, Vaccination } from 'israeli-health-scrapers';
 
 const scraperFactory = vi.hoisted(() => vi.fn());
 
@@ -20,9 +20,10 @@ const { HealthFundTypes, ScraperErrorTypes } = await import('israeli-health-scra
 const { closeDatabase, openDatabase } = await import('../../src/db/database.js');
 const { saveCredentials } = await import('../../src/db/credentials.js');
 const { listTestResults } = await import('../../src/db/test-results.js');
+const { listVaccinations } = await import('../../src/db/vaccinations.js');
 const { listMedications, upsertMedications } = await import('../../src/db/medications.js');
 const { lastSyncRun } = await import('../../src/db/sync-runs.js');
-const { fetchFund, fetchTestResultsForFund } = await import('../../src/sync/fetch.js');
+const { fetchFund, fetchTestResultsForFund, fetchVaccinationsForFund } = await import('../../src/sync/fetch.js');
 
 const fictionalResult: TestResult = {
   id: 'fictional-sync-result',
@@ -78,6 +79,56 @@ function expectFinishedFailedTestResultSync(message: string): void {
   });
   expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')?.finished_at).not.toBeNull();
 }
+
+describe('fetchVaccinationsForFund', () => {
+  const vaccination: Vaccination = {
+    id: 'fictional-sync-vaccination',
+    vaccineName: 'חיסון סנכרון דמיוני',
+    administeredOn: '2026-04-03',
+    dose: 'מנה 2',
+    location: 'מרפאת סנכרון',
+    provider: HealthFundTypes.maccabi,
+  };
+
+  it('requests only vaccinations, stores the flattened snapshot, and records success', async () => {
+    scraperFactory.mockReturnValue({
+      scrape: vi.fn().mockResolvedValue({
+        success: true,
+        accounts: [{ provider: HealthFundTypes.maccabi, medications: [], vaccinations: [vaccination] }],
+      }),
+    });
+
+    await expect(fetchVaccinationsForFund(HealthFundTypes.maccabi)).resolves.toMatchObject({
+      success: true,
+      recordCount: 1,
+    });
+    expect(scraperFactory).toHaveBeenCalledWith(expect.objectContaining({ fetch: ['vaccinations'] }));
+    expect(listVaccinations({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({ vaccination_id: vaccination.id }),
+    ]);
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'vaccinations')).toMatchObject({ success: 1, record_count: 1 });
+  });
+
+  it('returns scraper failures and records finished failure history', async () => {
+    scraperFactory.mockReturnValue({
+      scrape: vi.fn().mockResolvedValue({
+        success: false,
+        errorType: ScraperErrorTypes.InvalidPassword,
+        errorMessage: 'fictional vaccination credentials rejected',
+      }),
+    });
+
+    await expect(fetchVaccinationsForFund(HealthFundTypes.maccabi)).resolves.toMatchObject({
+      success: false,
+      recordCount: 0,
+      errorType: ScraperErrorTypes.InvalidPassword,
+    });
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'vaccinations')).toMatchObject({
+      success: 0,
+      error_message: 'fictional vaccination credentials rejected',
+    });
+  });
+});
 
 describe('fetchFund', () => {
   it('replaces a renewed medication instead of retaining its previous validity period', async () => {

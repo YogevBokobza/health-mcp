@@ -15,8 +15,9 @@ import {
 } from '../db/credentials.js';
 import { listMedications } from '../db/medications.js';
 import { listTestResults } from '../db/test-results.js';
+import { listVaccinations } from '../db/vaccinations.js';
 import { lastSyncRun } from '../db/sync-runs.js';
-import { fetchFunds, fetchTestResultsForFund } from '../sync/fetch.js';
+import { fetchFunds, fetchTestResultsForFund, fetchVaccinationsForFund } from '../sync/fetch.js';
 import { writeClaudeConfig } from './configure-claude.js';
 
 process.env.IHS_DATA_DIR ??= scraperDataDir();
@@ -42,8 +43,10 @@ Commands:
   login <fund>                  Interactive login; stores a reusable session
   fetch [fund...]               Fetch and store data (defaults to every configured fund)
   fetch-test-results [fund]     Fetch and store test results (one fund only)
+  fetch-vaccinations [fund]     Fetch and store vaccinations (one fund only)
   medications [fund]            Print stored prescriptions
   test-results [fund]           Print stored test results, newest first
+  vaccinations [fund]           Print stored vaccinations, newest first
   status                        Where data lives and when each fund last synced
   configure-claude              Add this server to Claude Desktop's config
 
@@ -179,6 +182,32 @@ function testResults(args: string[]): void {
   }
 }
 
+async function fetchVaccinations(args: string[]): Promise<void> {
+  const companyId = (args.find((arg) => !arg.startsWith('-')) ?? 'maccabi') as HealthFundId;
+  requireCredentials(companyId);
+  const outcome = await fetchVaccinationsForFund(companyId, { verbose: args.includes('--verbose') });
+  stdout.write(
+    outcome.success
+      ? `${outcome.companyId}: ${outcome.recordCount} records\n`
+      : `${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`,
+  );
+  if (!outcome.success) process.exitCode = 1;
+}
+
+function vaccinations(args: string[]): void {
+  const companyId = args.find((arg) => !arg.startsWith('-')) as HealthFundId | undefined;
+  const rows = listVaccinations(companyId ? { companyId } : {});
+  if (rows.length === 0) {
+    stdout.write('No stored vaccinations. Run: health-mcp fetch-vaccinations\n');
+    return;
+  }
+  for (const row of rows) {
+    stdout.write(
+      `${row.administered_on.padEnd(12)} ${row.vaccine_name.padEnd(30)} ${row.dose ?? ''} ${row.location ?? ''}\n`,
+    );
+  }
+}
+
 function status(): void {
   stdout.write(`data directory: ${appDataDir()}\n`);
   stdout.write(`database:       ${databasePath()}${databaseExists() ? '' : ' (not created yet)'}\n`);
@@ -231,11 +260,17 @@ async function main(): Promise<void> {
     case 'fetch-test-results':
       await fetchTestResults(args);
       break;
+    case 'fetch-vaccinations':
+      await fetchVaccinations(args);
+      break;
     case 'medications':
       medications(args);
       break;
     case 'test-results':
       testResults(args);
+      break;
+    case 'vaccinations':
+      vaccinations(args);
       break;
     case 'status':
       status();

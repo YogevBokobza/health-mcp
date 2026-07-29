@@ -7,6 +7,7 @@ import {
   type Appointment,
   type Medication,
   type TestResult,
+  type Vaccination,
 } from 'israeli-health-scrapers';
 
 // The data dir and key must be set before anything opens the database.
@@ -26,6 +27,7 @@ const { upsertAppointments, listAppointments } = await import('../../src/db/appo
 const { startSyncRun, finishSyncRun, lastSyncRun } = await import('../../src/db/sync-runs.js');
 const { runSafeQuery, listTables, describeTable } = await import('../../src/db/query.js');
 const { upsertTestResults, listTestResults } = await import('../../src/db/test-results.js');
+const { upsertVaccinations, listVaccinations } = await import('../../src/db/vaccinations.js');
 const { operationsFor } = await import('../../src/operations.js');
 
 function medication(overrides: Partial<Medication> = {}): Medication {
@@ -383,6 +385,78 @@ describe('test results', () => {
         test_name: 'בדיקת שאילתה בדיונית',
       },
     ]);
+  });
+});
+
+describe('vaccinations', () => {
+  const vaccination = (overrides: Partial<Vaccination> = {}): Vaccination => ({
+    id: 'fictional-vaccination-1',
+    vaccineName: 'חיסון דמיוני א',
+    administeredOn: '2026-03-14',
+    dose: 'מנה 1',
+    location: 'מרפאת דוגמה',
+    provider: HealthFundTypes.maccabi,
+    ...overrides,
+  });
+
+  it('upserts a fund-isolated snapshot and removes records absent from the next snapshot', () => {
+    upsertVaccinations(HealthFundTypes.maccabi, [
+      vaccination(),
+      vaccination({ id: 'fictional-vaccination-2', administeredOn: '2025-01-02' }),
+    ]);
+    upsertVaccinations(HealthFundTypes.clalit, [
+      vaccination({ id: 'fictional-clalit-vaccination', provider: HealthFundTypes.clalit }),
+    ]);
+
+    expect(upsertVaccinations(HealthFundTypes.maccabi, [vaccination({ location: 'מרפאה מעודכנת' })])).toBe(1);
+    expect(listVaccinations({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({
+        vaccination_id: 'fictional-vaccination-1',
+        vaccine_name: 'חיסון דמיוני א',
+        administered_on: '2026-03-14',
+        location: 'מרפאה מעודכנת',
+      }),
+    ]);
+    expect(listVaccinations({ companyId: HealthFundTypes.clalit })).toHaveLength(1);
+  });
+
+  it('deduplicates duplicate IDs using the last occurrence and reports unique rows', () => {
+    const duplicateId = 'fictional-vaccination-duplicate';
+    const uniqueCount = upsertVaccinations(HealthFundTypes.maccabi, [
+      vaccination({ id: duplicateId, location: 'מרפאה ראשונה' }),
+      vaccination({ id: 'fictional-vaccination-distinct', administeredOn: '2025-02-03' }),
+      vaccination({ id: duplicateId, location: 'מרפאה אחרונה' }),
+    ]);
+
+    expect(uniqueCount).toBe(2);
+    expect(listVaccinations({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({ vaccination_id: duplicateId, location: 'מרפאה אחרונה' }),
+      expect.objectContaining({ vaccination_id: 'fictional-vaccination-distinct' }),
+    ]);
+  });
+
+  it('does not store a fictional vaccination name in plaintext on disk', () => {
+    const vaccineName = 'חיסון הצפנה דמיוני';
+    upsertVaccinations(HealthFundTypes.maccabi, [vaccination({ vaccineName })]);
+    closeDatabase();
+    const raw = fs.readFileSync(path.join(tempDir, 'database.db'));
+    expect(raw.includes(Buffer.from(vaccineName))).toBe(false);
+    openDatabase();
+  });
+
+  it('orders newest first and exposes vaccinations to safe SQL queries', () => {
+    upsertVaccinations(HealthFundTypes.maccabi, [
+      vaccination({ id: 'fictional-vaccination-old', administeredOn: '2024-01-02' }),
+      vaccination({ id: 'fictional-vaccination-new', administeredOn: '2026-07-20' }),
+    ]);
+
+    expect(listVaccinations({ companyId: HealthFundTypes.maccabi }).map((row) => row.vaccination_id)).toEqual([
+      'fictional-vaccination-new',
+      'fictional-vaccination-old',
+    ]);
+    expect(listTables()).toContainEqual({ name: 'vaccinations', rowCount: 3 });
+    expect(describeTable('vaccinations').columns.map((column) => column.name)).toContain('administered_on');
+    expect(runSafeQuery('SELECT vaccination_id FROM vaccinations').rowCount).toBeGreaterThan(0);
   });
 });
 
