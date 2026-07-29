@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ScraperOptions, TestResult } from 'israeli-health-scrapers';
+import type { Medication, ScraperOptions, TestResult } from 'israeli-health-scrapers';
 
 const scraperFactory = vi.hoisted(() => vi.fn());
 
@@ -20,8 +20,9 @@ const { HealthFundTypes, ScraperErrorTypes } = await import('israeli-health-scra
 const { closeDatabase, openDatabase } = await import('../../src/db/database.js');
 const { saveCredentials } = await import('../../src/db/credentials.js');
 const { listTestResults } = await import('../../src/db/test-results.js');
+const { listMedications, upsertMedications } = await import('../../src/db/medications.js');
 const { lastSyncRun } = await import('../../src/db/sync-runs.js');
-const { fetchTestResultsForFund } = await import('../../src/sync/fetch.js');
+const { fetchFund, fetchTestResultsForFund } = await import('../../src/sync/fetch.js');
 
 const fictionalResult: TestResult = {
   id: 'fictional-sync-result',
@@ -31,6 +32,22 @@ const fictionalResult: TestResult = {
   provider: HealthFundTypes.maccabi,
 };
 
+function fictionalMedication(overrides: Partial<Medication> = {}): Medication {
+  return {
+    name: 'תרופת סנכרון בדיונית',
+    dosage: '10 מ״ג',
+    form: 'טבליות',
+    prescribedBy: 'ד״ר דמיון בלבד',
+    lastDispensed: null,
+    validUntil: '2026-08-15',
+    refillsRemaining: null,
+    daysUntilExpiry: 17,
+    status: 'expiring_soon',
+    provider: HealthFundTypes.maccabi,
+    ...overrides,
+  };
+}
+
 beforeAll(() => {
   openDatabase();
   saveCredentials(HealthFundTypes.maccabi, { id: 'fictional-member-id' });
@@ -39,6 +56,7 @@ beforeAll(() => {
 beforeEach(() => {
   scraperFactory.mockReset();
   openDatabase().prepare('DELETE FROM test_results').run();
+  openDatabase().prepare('DELETE FROM medications').run();
   openDatabase().prepare('DELETE FROM sync_runs').run();
 });
 
@@ -60,6 +78,59 @@ function expectFinishedFailedTestResultSync(message: string): void {
   });
   expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')?.finished_at).not.toBeNull();
 }
+
+describe('fetchFund', () => {
+  it('replaces a renewed medication instead of retaining its previous validity period', async () => {
+    upsertMedications(HealthFundTypes.maccabi, [fictionalMedication()]);
+    scraperFactory.mockReturnValue(
+      successfulScraper([
+        {
+          medications: [
+            fictionalMedication({
+              validUntil: '2026-10-15',
+              daysUntilExpiry: 78,
+              status: 'active',
+            }),
+          ],
+        },
+      ]),
+    );
+
+    await expect(fetchFund(HealthFundTypes.maccabi)).resolves.toEqual({
+      companyId: HealthFundTypes.maccabi,
+      success: true,
+      recordCount: 1,
+    });
+    expect(listMedications({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({ valid_until: '2026-10-15' }),
+    ]);
+  });
+
+  it('clears stored medications after a successful empty snapshot', async () => {
+    upsertMedications(HealthFundTypes.maccabi, [fictionalMedication()]);
+    scraperFactory.mockReturnValue(successfulScraper([{ medications: [] }]));
+
+    await expect(fetchFund(HealthFundTypes.maccabi)).resolves.toMatchObject({
+      success: true,
+      recordCount: 0,
+    });
+    expect(listMedications({ companyId: HealthFundTypes.maccabi })).toEqual([]);
+  });
+
+  it('preserves stored medications when the scrape fails', async () => {
+    upsertMedications(HealthFundTypes.maccabi, [fictionalMedication()]);
+    scraperFactory.mockReturnValue({
+      scrape: vi.fn().mockResolvedValue({
+        success: false,
+        errorType: ScraperErrorTypes.InvalidPassword,
+        errorMessage: 'fictional rejected credentials',
+      }),
+    });
+
+    await expect(fetchFund(HealthFundTypes.maccabi)).resolves.toMatchObject({ success: false });
+    expect(listMedications({ companyId: HealthFundTypes.maccabi })).toHaveLength(1);
+  });
+});
 
 describe('fetchTestResultsForFund', () => {
   it('keeps company, fetch target, and session storage authoritative over caller options', async () => {

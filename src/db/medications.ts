@@ -18,30 +18,51 @@ export interface StoredMedication {
   updated_at: string;
 }
 
+function medicationIdentity(medication: Pick<Medication, 'name' | 'validUntil'>): string {
+  return JSON.stringify([medication.name, medication.validUntil]);
+}
+
+function medicationParams(
+  companyId: HealthFundId,
+  medication: Medication,
+  firstSeenAt: string,
+  now: string,
+): Record<string, unknown> {
+  return {
+    companyId,
+    name: medication.name,
+    dosage: medication.dosage,
+    form: medication.form,
+    prescribedBy: medication.prescribedBy,
+    lastDispensed: medication.lastDispensed,
+    validUntil: medication.validUntil,
+    refillsRemaining: medication.refillsRemaining,
+    daysUntilExpiry: medication.daysUntilExpiry,
+    status: medication.status,
+    raw: medication.raw ? JSON.stringify(medication.raw) : null,
+    firstSeenAt,
+    now,
+  };
+}
+
+const INSERT_MEDICATION = `INSERT INTO medications (
+   company_id, name, dosage, form, prescribed_by, last_dispensed, valid_until,
+   refills_remaining, days_until_expiry, status, raw, first_seen_at, updated_at
+ ) VALUES (
+   @companyId, @name, @dosage, @form, @prescribedBy, @lastDispensed, @validUntil,
+   @refillsRemaining, @daysUntilExpiry, @status, @raw, @firstSeenAt, @now
+ )`;
+
 /**
- * Writes a fetch result into the table.
- *
- * Upserts on (fund, name, valid_until): a re-fetch updates the row it already has
- * rather than appending a duplicate, because this table answers "what am I on now",
- * not "what did every fetch return". `first_seen_at` is preserved on update so the
- * history of when a prescription appeared is not lost to that.
- *
- * `days_until_expiry` is recomputed by the scraper on every fetch, so a stale row from
- * last week reports last week's number until the next sync — which is why callers
- * should look at `sync_runs` before treating it as current.
+ * Adds medications to the table or updates an exact (fund, name, valid_until) match.
+ * Snapshot refreshes should use replaceMedicationsSnapshot so records no longer returned
+ * by the fund are removed.
  */
 export function upsertMedications(companyId: HealthFundId, medications: Medication[]): number {
   const db = openDatabase();
   const now = new Date().toISOString();
-
   const statement = db.prepare(
-    `INSERT INTO medications (
-       company_id, name, dosage, form, prescribed_by, last_dispensed, valid_until,
-       refills_remaining, days_until_expiry, status, raw, first_seen_at, updated_at
-     ) VALUES (
-       @companyId, @name, @dosage, @form, @prescribedBy, @lastDispensed, @validUntil,
-       @refillsRemaining, @daysUntilExpiry, @status, @raw, @now, @now
-     )
+    `${INSERT_MEDICATION}
      ON CONFLICT (company_id, name, valid_until) DO UPDATE SET
        dosage            = @dosage,
        form              = @form,
@@ -56,25 +77,54 @@ export function upsertMedications(companyId: HealthFundId, medications: Medicati
 
   const writeAll = db.transaction((items: Medication[]) => {
     for (const medication of items) {
-      statement.run({
-        companyId,
-        name: medication.name,
-        dosage: medication.dosage,
-        form: medication.form,
-        prescribedBy: medication.prescribedBy,
-        lastDispensed: medication.lastDispensed,
-        validUntil: medication.validUntil,
-        refillsRemaining: medication.refillsRemaining,
-        daysUntilExpiry: medication.daysUntilExpiry,
-        status: medication.status,
-        raw: medication.raw ? JSON.stringify(medication.raw) : null,
-        now,
-      });
+      statement.run(medicationParams(companyId, medication, now, now));
     }
     return items.length;
   });
 
   return writeAll(medications);
+}
+
+/** Replaces one fund's medications with its latest successful scraper snapshot. */
+export function replaceMedicationsSnapshot(
+  companyId: HealthFundId,
+  medications: Medication[],
+): number {
+  const db = openDatabase();
+  const now = new Date().toISOString();
+  const selectExisting = db.prepare(
+    'SELECT name, valid_until, first_seen_at FROM medications WHERE company_id = ?',
+  );
+  const removeAll = db.prepare('DELETE FROM medications WHERE company_id = ?');
+  const insert = db.prepare(INSERT_MEDICATION);
+
+  const replaceAll = db.transaction(() => {
+    const existing = selectExisting.all(companyId) as Pick<
+      StoredMedication,
+      'name' | 'valid_until' | 'first_seen_at'
+    >[];
+    const firstSeenByIdentity = new Map<string, string>();
+    for (const row of existing) {
+      const identity = medicationIdentity({ name: row.name, validUntil: row.valid_until });
+      const firstSeenAt = firstSeenByIdentity.get(identity);
+      if (firstSeenAt === undefined || row.first_seen_at < firstSeenAt) {
+        firstSeenByIdentity.set(identity, row.first_seen_at);
+      }
+    }
+
+    const snapshot = new Map(
+      medications.map((medication) => [medicationIdentity(medication), medication]),
+    );
+    removeAll.run(companyId);
+    for (const [identity, medication] of snapshot) {
+      insert.run(
+        medicationParams(companyId, medication, firstSeenByIdentity.get(identity) ?? now, now),
+      );
+    }
+    return snapshot.size;
+  });
+
+  return replaceAll();
 }
 
 export function listMedications(options: {

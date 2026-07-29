@@ -19,7 +19,9 @@ const { closeDatabase, openDatabase } = await import('../../src/db/database.js')
 const { saveCredentials, getCredentials, listCredentialedFunds, deleteCredentials } = await import(
   '../../src/db/credentials.js'
 );
-const { upsertMedications, listMedications } = await import('../../src/db/medications.js');
+const { upsertMedications, replaceMedicationsSnapshot, listMedications } = await import(
+  '../../src/db/medications.js'
+);
 const { upsertAppointments, listAppointments } = await import('../../src/db/appointments.js');
 const { startSyncRun, finishSyncRun, lastSyncRun } = await import('../../src/db/sync-runs.js');
 const { runSafeQuery, listTables, describeTable } = await import('../../src/db/query.js');
@@ -135,6 +137,10 @@ describe('credentials', () => {
 });
 
 describe('medications', () => {
+  beforeEach(() => {
+    openDatabase().prepare('DELETE FROM medications').run();
+  });
+
   it('upserts rather than duplicating on a re-fetch', () => {
     upsertMedications(HealthFundTypes.maccabi, [medication()]);
     upsertMedications(HealthFundTypes.maccabi, [medication({ refillsRemaining: 1 })]);
@@ -146,14 +152,87 @@ describe('medications', () => {
 
   it('preserves first_seen_at across an update', () => {
     // Otherwise every fetch would erase when a prescription first appeared.
+    upsertMedications(HealthFundTypes.maccabi, [medication()]);
     const before = listMedications()[0]!.first_seen_at;
     upsertMedications(HealthFundTypes.maccabi, [medication({ status: 'active' })]);
     expect(listMedications()[0]?.first_seen_at).toBe(before);
   });
 
   it('treats a different validity period as a different prescription', () => {
+    upsertMedications(HealthFundTypes.maccabi, [medication()]);
     upsertMedications(HealthFundTypes.maccabi, [medication({ validUntil: '2027-01-03' })]);
     expect(listMedications({ companyId: HealthFundTypes.maccabi })).toHaveLength(2);
+  });
+
+  it('replaces medications missing from the latest snapshot', () => {
+    upsertMedications(HealthFundTypes.maccabi, [medication({ validUntil: '2026-08-12' })]);
+
+    replaceMedicationsSnapshot(HealthFundTypes.maccabi, [
+      medication({ validUntil: '2026-10-12', daysUntilExpiry: 78, status: 'active' }),
+    ]);
+
+    const rows = listMedications({ companyId: HealthFundTypes.maccabi });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.valid_until).toBe('2026-10-12');
+  });
+
+  it('preserves exact entries and all distinct entries in the latest snapshot', () => {
+    upsertMedications(HealthFundTypes.maccabi, [medication()]);
+    const firstSeenAt = listMedications({ companyId: HealthFundTypes.maccabi })[0]!.first_seen_at;
+
+    replaceMedicationsSnapshot(HealthFundTypes.maccabi, [
+      medication({ refillsRemaining: 1 }),
+      medication({ validUntil: '2026-10-12', daysUntilExpiry: 78, status: 'active' }),
+    ]);
+
+    const rows = listMedications({ companyId: HealthFundTypes.maccabi });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.valid_until === '2026-08-12')?.first_seen_at).toBe(firstSeenAt);
+  });
+
+  it('deduplicates nullable identities within a snapshot', () => {
+    expect(
+      replaceMedicationsSnapshot(HealthFundTypes.maccabi, [
+        medication({ validUntil: null, daysUntilExpiry: null, status: 'unknown' }),
+        medication({ validUntil: null, daysUntilExpiry: null, status: 'unknown' }),
+      ]),
+    ).toBe(1);
+    expect(listMedications({ companyId: HealthFundTypes.maccabi })).toHaveLength(1);
+  });
+
+  it('preserves the earliest first_seen_at from legacy nullable duplicates', () => {
+    const insert = openDatabase().prepare(
+      `INSERT INTO medications (
+         company_id, name, valid_until, status, first_seen_at, updated_at
+       ) VALUES (?, ?, NULL, 'unknown', ?, ?)`,
+    );
+    insert.run(HealthFundTypes.maccabi, 'תרופה בדיונית ללא תאריך', '2026-01-01', '2026-01-01');
+    insert.run(HealthFundTypes.maccabi, 'תרופה בדיונית ללא תאריך', '2026-02-01', '2026-02-01');
+
+    replaceMedicationsSnapshot(HealthFundTypes.maccabi, [
+      medication({
+        name: 'תרופה בדיונית ללא תאריך',
+        validUntil: null,
+        daysUntilExpiry: null,
+        status: 'unknown',
+      }),
+    ]);
+
+    expect(listMedications({ companyId: HealthFundTypes.maccabi })[0]?.first_seen_at).toBe(
+      '2026-01-01',
+    );
+  });
+
+  it('clears only the refreshed fund when the latest snapshot is empty', () => {
+    upsertMedications(HealthFundTypes.maccabi, [medication()]);
+    upsertMedications(HealthFundTypes.mock, [
+      medication({ name: 'תרופה בדיונית לקרן אחרת', provider: HealthFundTypes.mock }),
+    ]);
+
+    replaceMedicationsSnapshot(HealthFundTypes.maccabi, []);
+
+    expect(listMedications({ companyId: HealthFundTypes.maccabi })).toEqual([]);
+    expect(listMedications({ companyId: HealthFundTypes.mock })).toHaveLength(1);
   });
 
   it('sorts soonest-to-expire first and puts unknown expiry last', () => {
