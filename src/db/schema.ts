@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -96,6 +96,7 @@ const STATEMENTS = [
      vaccination_id  TEXT NOT NULL,
      vaccine_name    TEXT NOT NULL,
      administered_on TEXT NOT NULL,
+     age_at_administration REAL,
      dose             TEXT,
      location         TEXT,
      raw              TEXT,
@@ -155,6 +156,7 @@ export function migrate(db: Database): void {
     for (const statement of STATEMENTS) db.exec(statement);
 
     addColumnIfMissing(db, 'sync_runs', 'resource', "TEXT NOT NULL DEFAULT 'medications'");
+    addColumnIfMissing(db, 'vaccinations', 'age_at_administration', 'REAL');
 
     const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as
       | { version: number }

@@ -8,6 +8,7 @@ export interface StoredVaccination {
   vaccination_id: string;
   vaccine_name: string;
   administered_on: string;
+  age_at_administration: number | null;
   dose: string | null;
   location: string | null;
   raw: string | null;
@@ -31,15 +32,18 @@ export function upsertVaccinations(companyId: HealthFundId, vaccinations: Vaccin
   const items = [...uniqueVaccinations.values()];
   const statement = db.prepare(
     `INSERT INTO vaccinations (
-       company_id, vaccination_id, vaccine_name, administered_on, dose, location, raw,
+       company_id, vaccination_id, vaccine_name, administered_on, age_at_administration,
+       dose, location, raw,
        first_seen_at, updated_at
      ) VALUES (
-       @companyId, @vaccinationId, @vaccineName, @administeredOn, @dose, @location, @raw,
+       @companyId, @vaccinationId, @vaccineName, @administeredOn, @ageAtAdministration,
+       @dose, @location, @raw,
        @now, @now
      )
      ON CONFLICT (company_id, vaccination_id) DO UPDATE SET
        vaccine_name    = @vaccineName,
        administered_on = @administeredOn,
+       age_at_administration = @ageAtAdministration,
        dose             = @dose,
        location         = @location,
        raw              = @raw,
@@ -55,6 +59,7 @@ export function upsertVaccinations(companyId: HealthFundId, vaccinations: Vaccin
         vaccinationId: vaccination.id,
         vaccineName: vaccination.vaccineName,
         administeredOn: vaccination.administeredOn,
+        ageAtAdministration: vaccination.ageAtAdministration,
         dose: vaccination.dose,
         location: vaccination.location,
         raw: vaccination.raw ? JSON.stringify(vaccination.raw) : null,

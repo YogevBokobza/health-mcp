@@ -202,8 +202,9 @@ function vaccinations(args: string[]): void {
     return;
   }
   for (const row of rows) {
+    const age = row.age_at_administration === null ? '' : `age ${row.age_at_administration}`;
     stdout.write(
-      `${row.administered_on.padEnd(12)} ${row.vaccine_name.padEnd(30)} ${row.dose ?? ''} ${row.location ?? ''}\n`,
+      `${row.administered_on.padEnd(12)} ${row.vaccine_name.padEnd(30)} ${age} ${row.dose ?? ''} ${row.location ?? ''}\n`,
     );
   }
 }

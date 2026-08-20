@@ -45,6 +45,7 @@ describe('CLI vaccinations command', () => {
         id: 'fictional-cli-vaccination-earlier',
         vaccineName: 'חיסון מוקדם דמיוני',
         administeredOn: '2024-01-02',
+        ageAtAdministration: 20.1,
         dose: 'מנה 1',
         location: 'מרפאה א',
         provider: HealthFundTypes.maccabi,
@@ -53,6 +54,7 @@ describe('CLI vaccinations command', () => {
         id: 'fictional-cli-vaccination-later',
         vaccineName: 'חיסון מאוחר דמיוני',
         administeredOn: '2026-07-20',
+        ageAtAdministration: 22.6,
         dose: 'מנה 2',
         location: 'מרפאה ב',
         provider: HealthFundTypes.maccabi,
@@ -66,6 +68,7 @@ describe('CLI vaccinations command', () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('חיסון מאוחר דמיוני');
+    expect(result.stdout).toContain('age 22.6');
     expect(result.stdout.indexOf('2026-07-20')).toBeLessThan(result.stdout.indexOf('2024-01-02'));
     openDatabase();
   });

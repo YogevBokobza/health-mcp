@@ -393,6 +393,7 @@ describe('vaccinations', () => {
     id: 'fictional-vaccination-1',
     vaccineName: 'חיסון דמיוני א',
     administeredOn: '2026-03-14',
+    ageAtAdministration: 42.5,
     dose: 'מנה 1',
     location: 'מרפאת דוגמה',
     provider: HealthFundTypes.maccabi,
@@ -408,12 +409,17 @@ describe('vaccinations', () => {
       vaccination({ id: 'fictional-clalit-vaccination', provider: HealthFundTypes.clalit }),
     ]);
 
-    expect(upsertVaccinations(HealthFundTypes.maccabi, [vaccination({ location: 'מרפאה מעודכנת' })])).toBe(1);
+    expect(
+      upsertVaccinations(HealthFundTypes.maccabi, [
+        vaccination({ location: 'מרפאה מעודכנת', ageAtAdministration: 43.1 }),
+      ]),
+    ).toBe(1);
     expect(listVaccinations({ companyId: HealthFundTypes.maccabi })).toEqual([
       expect.objectContaining({
         vaccination_id: 'fictional-vaccination-1',
         vaccine_name: 'חיסון דמיוני א',
         administered_on: '2026-03-14',
+        age_at_administration: 43.1,
         location: 'מרפאה מעודכנת',
       }),
     ]);
@@ -455,7 +461,9 @@ describe('vaccinations', () => {
       'fictional-vaccination-old',
     ]);
     expect(listTables()).toContainEqual({ name: 'vaccinations', rowCount: 3 });
-    expect(describeTable('vaccinations').columns.map((column) => column.name)).toContain('administered_on');
+    expect(describeTable('vaccinations').columns.map((column) => column.name)).toContain(
+      'age_at_administration',
+    );
     expect(runSafeQuery('SELECT vaccination_id FROM vaccinations').rowCount).toBeGreaterThan(0);
   });
 });

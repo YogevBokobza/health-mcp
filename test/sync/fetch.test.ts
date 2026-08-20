@@ -85,6 +85,7 @@ describe('fetchVaccinationsForFund', () => {
     id: 'fictional-sync-vaccination',
     vaccineName: 'חיסון סנכרון דמיוני',
     administeredOn: '2026-04-03',
+    ageAtAdministration: 31.7,
     dose: 'מנה 2',
     location: 'מרפאת סנכרון',
     provider: HealthFundTypes.maccabi,
@@ -104,7 +105,10 @@ describe('fetchVaccinationsForFund', () => {
     });
     expect(scraperFactory).toHaveBeenCalledWith(expect.objectContaining({ fetch: ['vaccinations'] }));
     expect(listVaccinations({ companyId: HealthFundTypes.maccabi })).toEqual([
-      expect.objectContaining({ vaccination_id: vaccination.id }),
+      expect.objectContaining({
+        vaccination_id: vaccination.id,
+        age_at_administration: vaccination.ageAtAdministration,
+      }),
     ]);
     expect(lastSyncRun(HealthFundTypes.maccabi, 'vaccinations')).toMatchObject({ success: 1, record_count: 1 });
   });
