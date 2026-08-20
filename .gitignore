@@ -11,3 +11,18 @@ credentials.json
 
 *.log
 .DS_Store
+.vscode/
+
+# Graphify local state
+graphify-out/
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_labels.json
+graphify-out/cost.json
+graphify-out/cache/
+
+# Repowise
+.repowise/
+
+# MCP
+*.mcp.json
