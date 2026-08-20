@@ -12,7 +12,8 @@ permissions, and the agent protocol.
 Nothing is sent anywhere. There is no server, no account, no telemetry.
 
 **Status:** early. Maccabi medications, appointments, and test results work end to end
-against the local store, calibrated against a live account. Other funds are declared in the
+against the local store. Vaccinations storage and access are implemented, but live calibration
+and the remote scraper dependency lock are still pending. Other funds are declared in the
 library but not implemented yet.
 
 ## Why not just give the agent a browser
@@ -77,6 +78,8 @@ health-mcp fetch
 health-mcp medications
 health-mcp fetch-test-results maccabi
 health-mcp test-results maccabi
+health-mcp fetch-vaccinations maccabi
+health-mcp vaccinations maccabi
 ```
 
 ## Connect to Claude
@@ -120,11 +123,13 @@ Inspect it locally first with `npm run start:mcp:inspector`.
 | `appointments_refresh` | Log into the fund and refresh appointments (clinic address + pre-visit instructions included) | `<fund>:appointments:read` |
 | `testResults_list` | Test results from the local store, with `lastSync` | `<fund>:testResults:read` |
 | `testResults_refresh` | Log into the fund and refresh test results | `<fund>:testResults:read` |
+| `vaccinations_list` | Vaccination history from the local store, with `lastSync` | `<fund>:vaccinations:read` |
+| `vaccinations_refresh` | Log into the fund and refresh vaccinations | `<fund>:vaccinations:read` |
 | `db_listTables` | Readable tables and row counts | `local:database:read` |
 | `db_describeTable` | Columns, types, keys | `local:database:read` |
 | `db_sqlQuery` | A single read-only SELECT | `local:database:read` |
 
-`medications_list`/`appointments_list`/`testResults_list` return `lastSync` alongside the
+`medications_list`/`appointments_list`/`testResults_list`/`vaccinations_list` return `lastSync` alongside the
 data rather than hiding it behind another tool: a list is misleading without knowing how
 old it is. `lastSync.at` is the most recent attempt's completion time (or start time if it
 is still running), `success` says whether that attempt succeeded, and `errorType` records
@@ -228,6 +233,8 @@ health-mcp fetch [fund...]
 health-mcp medications [fund]
 health-mcp fetch-test-results [fund]
 health-mcp test-results [fund]
+health-mcp fetch-vaccinations [fund]
+health-mcp vaccinations [fund]
 health-mcp status
 health-mcp configure-claude
 ```
@@ -235,7 +242,9 @@ health-mcp configure-claude
 `fetch-test-results [fund]` fetches and stores test results for one fund (defaulting to
 Maccabi), while `test-results [fund]` prints the locally stored results newest first. The
 MCP `testResults_list`/`testResults_refresh` tools provide the same local-list/remote-refresh
-split for agents. Appointments currently has no CLI path; use the
+split for agents. `fetch-vaccinations [fund]` and `vaccinations [fund]` provide equivalent
+vaccination refresh/list access, with `vaccinations_list`/`vaccinations_refresh` available
+to agents. Appointments currently has no CLI path; use the
 `appointments_list`/`appointments_refresh` MCP tools.
 
 ## Tests

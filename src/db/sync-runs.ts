@@ -3,7 +3,7 @@ import type { HealthFundId } from 'israeli-health-scrapers';
 import { openDatabase } from './database.js';
 
 /** Which collection a sync run fetched — one row of history per resource per fund. */
-export type SyncResource = 'medications' | 'appointments' | 'testResults';
+export type SyncResource = 'medications' | 'appointments' | 'testResults' | 'vaccinations';
 
 export interface SyncRun {
   id: number;
