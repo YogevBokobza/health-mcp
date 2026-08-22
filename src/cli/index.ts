@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { z } from 'zod';
@@ -23,8 +24,13 @@ import {
   fetchForm17ForFund,
   fetchTestResultsForFund,
   fetchVaccinationsForFund,
+  type FetchOutcome,
 } from '../sync/fetch.js';
 import { writeClaudeConfig } from './configure-claude.js';
+
+// require, not an import assertion: works identically from source (tsx) and from the
+// built dist/cli/index.js, where '../../package.json' resolves to the package root.
+const { version } = createRequire(import.meta.url)('../../package.json') as { version: string };
 
 process.env.IHS_DATA_DIR ??= scraperDataDir();
 // The library encrypts stored sessions with its own key; reuse HEALTH_MCP_KEY rather
@@ -87,6 +93,25 @@ async function ingestCreds(args: string[]): Promise<void> {
   );
 }
 
+/**
+ * Renders one fetch outcome, adding the CLI-specific recovery hint the shared
+ * classifier deliberately leaves out (it speaks to whichever agent is listening, not
+ * to a terminal).
+ */
+function printOutcome(outcome: FetchOutcome): void {
+  if (outcome.success) {
+    stdout.write(`${outcome.companyId}: ${outcome.recordCount} records\n`);
+    return;
+  }
+
+  stdout.write(`${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`);
+  if (outcome.status === 'session_expired') {
+    stdout.write(`  → session expired; run: health-mcp login ${outcome.companyId}\n`);
+  } else if (outcome.status === 'credentials_rejected') {
+    stdout.write(`  → update credentials with: health-mcp ingest-creds -f <file>\n`);
+  }
+}
+
 async function login(args: string[]): Promise<void> {
   const companyId = (args[0] ?? 'maccabi') as HealthFundId;
   const credentials = requireCredentials(companyId);
@@ -128,13 +153,7 @@ async function fetch(args: string[]): Promise<void> {
 
   const outcomes = await fetchFunds(funds, { verbose: args.includes('--verbose') });
 
-  for (const outcome of outcomes) {
-    stdout.write(
-      outcome.success
-        ? `${outcome.companyId}: ${outcome.recordCount} records\n`
-        : `${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`,
-    );
-  }
+  for (const outcome of outcomes) printOutcome(outcome);
 
   if (outcomes.some((outcome) => !outcome.success)) process.exitCode = 1;
 }
@@ -166,11 +185,7 @@ async function fetchTestResults(args: string[]): Promise<void> {
 
   const outcome = await fetchTestResultsForFund(companyId, { verbose: args.includes('--verbose') });
 
-  stdout.write(
-    outcome.success
-      ? `${outcome.companyId}: ${outcome.recordCount} records\n`
-      : `${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`,
-  );
+  printOutcome(outcome);
   if (!outcome.success) process.exitCode = 1;
 }
 
@@ -194,11 +209,7 @@ async function fetchVaccinations(args: string[]): Promise<void> {
   const companyId = (args.find((arg) => !arg.startsWith('-')) ?? 'maccabi') as HealthFundId;
   requireCredentials(companyId);
   const outcome = await fetchVaccinationsForFund(companyId, { verbose: args.includes('--verbose') });
-  stdout.write(
-    outcome.success
-      ? `${outcome.companyId}: ${outcome.recordCount} records\n`
-      : `${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`,
-  );
+  printOutcome(outcome);
   if (!outcome.success) process.exitCode = 1;
 }
 
@@ -221,11 +232,7 @@ async function fetchForm17(args: string[]): Promise<void> {
   const companyId = (args.find((arg) => !arg.startsWith('-')) ?? 'maccabi') as HealthFundId;
   requireCredentials(companyId);
   const outcome = await fetchForm17ForFund(companyId, { verbose: args.includes('--verbose') });
-  stdout.write(
-    outcome.success
-      ? `${outcome.companyId}: ${outcome.recordCount} records\n`
-      : `${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`,
-  );
+  printOutcome(outcome);
   if (!outcome.success) process.exitCode = 1;
 }
 
@@ -246,6 +253,7 @@ function form17(args: string[]): void {
 }
 
 function status(): void {
+  stdout.write(`version:        ${version}\n`);
   stdout.write(`data directory: ${appDataDir()}\n`);
   stdout.write(`database:       ${databasePath()}${databaseExists() ? '' : ' (not created yet)'}\n`);
 

@@ -38,6 +38,12 @@ npx vitest run -t "upserts rather than duplicating"
 for Node LTS versions with published prebuilds — Node 24 commonly has none, causing an
 `npm install` build failure. Use Node 22 if you hit this.
 
+## Agent-facing install runbook
+
+If asked to install, upgrade, or uninstall this repo **as an MCP server** (by a human
+user, from outside this repo), follow `docs/AGENT-INSTALL.md` — install the latest
+release tag (never master), and stop at the marked human-only steps.
+
 ## Architecture
 
 **The dependency chain is strict:** `israeli-health-scrapers` (the library) never knows

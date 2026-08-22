@@ -25,6 +25,7 @@ const { listForm17Requests } = await import('../../src/db/form17.js');
 const { listMedications, upsertMedications } = await import('../../src/db/medications.js');
 const { lastSyncRun } = await import('../../src/db/sync-runs.js');
 const {
+  classifyFetchFailure,
   fetchFund,
   fetchForm17ForFund,
   fetchTestResultsForFund,
@@ -133,6 +134,7 @@ describe('fetchVaccinationsForFund', () => {
       success: false,
       recordCount: 0,
       errorType: ScraperErrorTypes.InvalidPassword,
+      status: 'credentials_rejected',
     });
     expect(lastSyncRun(HealthFundTypes.maccabi, 'vaccinations')).toMatchObject({
       success: 0,
@@ -192,10 +194,13 @@ describe('fetchForm17ForFund', () => {
       success: false,
       recordCount: 0,
       errorType: ScraperErrorTypes.TwoFactorRetrieverMissing,
+      status: 'session_expired',
     });
     expect(lastSyncRun(HealthFundTypes.maccabi, 'form17')).toMatchObject({
       success: 0,
-      error_message: expect.stringContaining('health-mcp login'),
+      // The raw scraper message, not a CLI-oriented rewrite: the agent-facing "what to
+      // do next" lives in the outcome's `next` field, not here.
+      error_message: 'fictional form17 session gone',
     });
   });
 });
@@ -315,6 +320,8 @@ describe('fetchTestResultsForFund', () => {
       recordCount: 0,
       errorType: ScraperErrorTypes.InvalidPassword,
       errorMessage: 'fictional rejected credentials',
+      status: 'credentials_rejected',
+      next: expect.any(String),
     });
     expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')).toMatchObject({
       success: 0,
@@ -322,5 +329,32 @@ describe('fetchTestResultsForFund', () => {
       error_message: 'fictional rejected credentials',
     });
     expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')?.finished_at).not.toBeNull();
+  });
+});
+
+describe('classifyFetchFailure', () => {
+  it('maps a missing OTP retriever to a session_expired re-auth instruction', () => {
+    const action = classifyFetchFailure('maccabi', ScraperErrorTypes.TwoFactorRetrieverMissing);
+    expect(action.status).toBe('session_expired');
+    expect(action.next).toContain('auth_start');
+    expect(action.next).toContain('auth_complete');
+  });
+
+  it('maps password failures to credentials_rejected', () => {
+    for (const errorType of [
+      ScraperErrorTypes.InvalidPassword,
+      ScraperErrorTypes.ChangePassword,
+      ScraperErrorTypes.AccountBlocked,
+    ]) {
+      expect(classifyFetchFailure('maccabi', errorType).status).toBe('credentials_rejected');
+    }
+  });
+
+  it('leaves operational failures unclassified', () => {
+    expect(classifyFetchFailure('maccabi', ScraperErrorTypes.Timeout)).toEqual({
+      status: 'fetch_failed',
+      next: null,
+    });
+    expect(classifyFetchFailure('maccabi', undefined)).toEqual({ status: 'fetch_failed', next: null });
   });
 });
