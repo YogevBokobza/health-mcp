@@ -22,6 +22,61 @@ export interface FetchOutcome {
   recordCount: number;
   errorType?: string;
   errorMessage?: string;
+  /** Failure classification; present only when `success` is false. */
+  status?: FetchFailureStatus;
+  /** What an agent should do next about the failure; null when there is no advice. */
+  next?: string | null;
+}
+
+/** What went wrong at the auth layer, in the vocabulary an agent can act on. */
+export type FetchFailureStatus = 'session_expired' | 'credentials_rejected' | 'fetch_failed';
+
+export interface FetchFailureAction {
+  status: FetchFailureStatus;
+  /**
+   * An instruction to the agent, not to the member: it names the MCP or CLI action
+   * that recovers. English on purpose — the member-facing wording is the agent's
+   * to produce (docs/AGENT-INSTALL.md sets the convention).
+   */
+  next: string | null;
+}
+
+/**
+ * Turns a scraper errorType into the pair every failed fetch returns: a coarse
+ * status and the recovery step. A refresh runs unattended, so "the fund asked for
+ * an SMS code" actually means "the stored session expired" — and an agent told
+ * merely that cannot recover without being told how.
+ */
+export function classifyFetchFailure(companyId: string, errorType?: string): FetchFailureAction {
+  if (errorType === ScraperErrorTypes.TwoFactorRetrieverMissing) {
+    return {
+      status: 'session_expired',
+      next: `The stored session for ${companyId} expired or was invalidated. Ask the user to re-authenticate: call auth_start for ${companyId}, get the SMS code from the user, then finish with auth_complete.`,
+    };
+  }
+
+  if (errorType === ScraperErrorTypes.InvalidPassword) {
+    return {
+      status: 'credentials_rejected',
+      next: `The fund rejected the stored password for ${companyId}. Ask the user for the current password and update the stored credentials via the CLI (docs/AGENT-INSTALL.md, "When logins expire").`,
+    };
+  }
+
+  if (errorType === ScraperErrorTypes.ChangePassword) {
+    return {
+      status: 'credentials_rejected',
+      next: `${companyId} requires a password change before logging in. Ask the user to change it on the fund's website, then update the stored credentials via the CLI (docs/AGENT-INSTALL.md, "When logins expire").`,
+    };
+  }
+
+  if (errorType === ScraperErrorTypes.AccountBlocked) {
+    return {
+      status: 'credentials_rejected',
+      next: `The account at ${companyId} is blocked. Ask the user to unblock it with the fund, then re-authenticate with auth_start.`,
+    };
+  }
+
+  return { status: 'fetch_failed', next: null };
 }
 
 /**
@@ -60,20 +115,16 @@ async function runFetch(
     const result = await scraper.scrape(credentials);
 
     if (!result.success) {
-      // fetch deliberately never carries an otpCodeRetriever — it runs unattended. This
-      // exact errorType is what "the stored session no longer works" looks like: it
-      // expired, or the member logged in elsewhere and the fund invalidated it. The
-      // library's message talks about otpCodeRetriever, which means nothing to a member
-      // deciding what to do next.
-      const errorMessage =
-        result.errorType === ScraperErrorTypes.TwoFactorRetrieverMissing
-          ? `Session expired or you logged in elsewhere. Run: health-mcp login ${companyId}`
-          : result.errorMessage;
+      // fetch deliberately never carries an otpCodeRetriever — it runs unattended. The
+      // classifier turns the scraper's error vocabulary into the status/next pair an
+      // agent can act on; the raw errorMessage stays as the fund's own words for
+      // diagnostics, and the CLI renders its own hint from the status.
+      const action = classifyFetchFailure(companyId, result.errorType);
 
       finishSyncRun(runId, {
         success: false,
         errorType: result.errorType,
-        errorMessage,
+        errorMessage: result.errorMessage,
       });
 
       return {
@@ -81,7 +132,8 @@ async function runFetch(
         success: false,
         recordCount: 0,
         errorType: result.errorType,
-        errorMessage,
+        errorMessage: result.errorMessage,
+        ...action,
       };
     }
 

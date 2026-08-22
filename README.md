@@ -26,12 +26,32 @@ hand-written call to one is refused anyway.
 ## Install
 
 ```bash
-git clone https://github.com/YogevBokobza/health-mcp
+git clone --branch v0.1.0 https://github.com/YogevBokobza/health-mcp
 cd health-mcp
 npm install
 npm run build
 npm install -g .        # optional: puts `health-mcp` on your PATH
 ```
+
+Replace `v0.1.0` with the latest release tag —
+[check here](https://github.com/YogevBokobza/health-mcp/releases/latest). Cloning
+`master` isn't the supported install path; releases are what's tested.
+
+### Install via an AI agent
+
+If you're setting this up with Claude Code, Codex, or another coding agent, skip the
+manual steps below and instead tell the agent:
+
+> Install the MCP server from https://github.com/YogevBokobza/health-mcp (latest
+> release, not master) by following docs/AGENT-INSTALL.md from the repo. Do the
+> agent-doable steps yourself; stop and ask me for the steps marked human-only.
+
+It will install the latest release, generate and register the encryption key, verify
+the server, and then hand back to you for the human-only steps (fund choice, password
+or SMS, the SMS code itself). Later, the same runbook covers upgrades and removal:
+
+> Upgrade health-mcp following docs/AGENT-INSTALL.md (§Upgrade).
+> Uninstall health-mcp following docs/AGENT-INSTALL.md (§Uninstall).
 
 ## Set up
 

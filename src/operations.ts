@@ -8,9 +8,10 @@ import { listAppointments } from './db/appointments.js';
 import { listTestResults } from './db/test-results.js';
 import { listVaccinations } from './db/vaccinations.js';
 import { listForm17Requests } from './db/form17.js';
-import { lastSyncRun } from './db/sync-runs.js';
+import { lastSyncRun, type SyncResource } from './db/sync-runs.js';
 import { describeTable, listTables, runSafeQuery } from './db/query.js';
 import {
+  classifyFetchFailure,
   fetchAppointmentsForFund,
   fetchForm17ForFund,
   fetchFund,
@@ -49,6 +50,26 @@ export function configuredFunds(): HealthFundId[] {
   }
 }
 
+/**
+ * The `lastSync` object returned by every list operation. The classification turns a
+ * failed attempt's errorType into the same status/next pair the refresh operations
+ * return, so an agent reading stale data sees "session_expired — re-authenticate"
+ * rather than a raw error code it must interpret.
+ */
+function lastSyncPayload(companyId: HealthFundId, resource: SyncResource) {
+  const sync = lastSyncRun(companyId, resource);
+  if (!sync) return null;
+
+  const success = sync.success === 1;
+
+  return {
+    at: sync.finished_at ?? sync.started_at,
+    success,
+    errorType: sync.error_type,
+    ...(success ? {} : classifyFetchFailure(companyId, sync.error_type ?? undefined)),
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Per-fund operations                                                         */
 /* -------------------------------------------------------------------------- */
@@ -77,20 +98,9 @@ function medicationsListOperation(companyId: HealthFundId): Operation {
 
     async run(input) {
       const parsed = input as z.infer<typeof listMedicationsInput>;
-      const items = listMedications({ companyId, ...parsed });
-      const sync = lastSyncRun(companyId, 'medications');
-
       return {
-        items,
-        // Returned alongside the data, not buried in another tool: a list of
-        // prescriptions is misleading without knowing how old it is.
-        lastSync: sync
-          ? {
-              at: sync.finished_at ?? sync.started_at,
-              success: sync.success === 1,
-              errorType: sync.error_type,
-            }
-          : null,
+        items: listMedications({ companyId, ...parsed }),
+        lastSync: lastSyncPayload(companyId, 'medications'),
       };
     },
   };
@@ -125,18 +135,9 @@ function appointmentsListOperation(companyId: HealthFundId): Operation {
     input: z.object({}).default({}),
 
     async run() {
-      const items = listAppointments({ companyId });
-      const sync = lastSyncRun(companyId, 'appointments');
-
       return {
-        items,
-        lastSync: sync
-          ? {
-              at: sync.finished_at ?? sync.started_at,
-              success: sync.success === 1,
-              errorType: sync.error_type,
-            }
-          : null,
+        items: listAppointments({ companyId }),
+        lastSync: lastSyncPayload(companyId, 'appointments'),
       };
     },
   };
@@ -172,18 +173,9 @@ function testResultsListOperation(companyId: HealthFundId): Operation {
     input: z.object({}).default({}),
 
     async run() {
-      const items = listTestResults({ companyId });
-      const sync = lastSyncRun(companyId, 'testResults');
-
       return {
-        items,
-        lastSync: sync
-          ? {
-              at: sync.finished_at ?? sync.started_at,
-              success: sync.success === 1,
-              errorType: sync.error_type,
-            }
-          : null,
+        items: listTestResults({ companyId }),
+        lastSync: lastSyncPayload(companyId, 'testResults'),
       };
     },
   };
@@ -216,17 +208,9 @@ function vaccinationsListOperation(companyId: HealthFundId): Operation {
     input: z.object({}).default({}),
 
     async run() {
-      const items = listVaccinations({ companyId });
-      const sync = lastSyncRun(companyId, 'vaccinations');
       return {
-        items,
-        lastSync: sync
-          ? {
-              at: sync.finished_at ?? sync.started_at,
-              success: sync.success === 1,
-              errorType: sync.error_type,
-            }
-          : null,
+        items: listVaccinations({ companyId }),
+        lastSync: lastSyncPayload(companyId, 'vaccinations'),
       };
     },
   };
@@ -259,17 +243,9 @@ function form17ListOperation(companyId: HealthFundId): Operation {
     input: z.object({}).default({}),
 
     async run() {
-      const items = listForm17Requests({ companyId });
-      const sync = lastSyncRun(companyId, 'form17');
       return {
-        items,
-        lastSync: sync
-          ? {
-              at: sync.finished_at ?? sync.started_at,
-              success: sync.success === 1,
-              errorType: sync.error_type,
-            }
-          : null,
+        items: listForm17Requests({ companyId }),
+        lastSync: lastSyncPayload(companyId, 'form17'),
       };
     },
   };
