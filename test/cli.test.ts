@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HealthFundTypes, type TestResult, type Vaccination } from 'israeli-health-scrapers';
+import { HealthFundTypes, type Form17Request, type TestResult, type Vaccination } from 'israeli-health-scrapers';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-mcp-cli-test-'));
 const key = 'fictional-cli-test-key';
@@ -15,6 +15,7 @@ process.env.HEALTH_MCP_AUDIT = 'off';
 const { closeDatabase, openDatabase } = await import('../src/db/database.js');
 const { upsertTestResults } = await import('../src/db/test-results.js');
 const { upsertVaccinations } = await import('../src/db/vaccinations.js');
+const { upsertForm17Requests } = await import('../src/db/form17.js');
 
 function runCli(...args: string[]) {
   return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', ...args], {
@@ -133,5 +134,63 @@ describe('CLI test-results command', () => {
     expect(result.stdout).toBe('No stored test results. Run: health-mcp fetch-test-results\n');
 
     openDatabase();
+  });
+});
+
+describe('CLI form17 command', () => {
+  const form17Request = (overrides: Partial<Form17Request> = {}): Form17Request => ({
+    id: 'fictional-cli-form17-earlier',
+    requestType: 'טופס 17 מוקדם',
+    status: 'אושר',
+    submittedOn: '2026-05-10',
+    statusUpdatedOn: '2026-05-15',
+    providerName: 'ד"ר דוגמה מוקדם',
+    appointmentOn: '2026-06-10',
+    documentLabels: ['אישור מוקדם'],
+    canChangeAppointment: false,
+    requiresAdditionalInfo: null,
+    provider: HealthFundTypes.maccabi,
+    ...overrides,
+  });
+
+  it('prints stored form17 requests newest first for the selected fund', () => {
+    upsertForm17Requests(HealthFundTypes.maccabi, [
+      form17Request(),
+      form17Request({
+        id: 'fictional-cli-form17-later',
+        requestType: 'טופס 17 מאוחר',
+        submittedOn: '2026-07-20',
+        appointmentOn: null,
+        documentLabels: [],
+      }),
+    ]);
+    closeDatabase();
+
+    const result = runCli('form17', 'maccabi');
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('טופס 17 מאוחר');
+    expect(result.stdout).toContain('אושר');
+    expect(result.stdout).toContain('[אישור מוקדם]');
+    expect(result.stdout.indexOf('2026-07-20')).toBeLessThan(result.stdout.indexOf('2026-05-10'));
+    openDatabase();
+  });
+
+  it('shows the dedicated refresh command when no form17 requests are stored', () => {
+    openDatabase().prepare('DELETE FROM form17_requests').run();
+    closeDatabase();
+
+    const result = runCli('form17', 'maccabi');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('No stored Form 17 requests. Run: health-mcp fetch-form17\n');
+    openDatabase();
+  });
+
+  it('advertises the form17 fetch command', () => {
+    const result = runCli();
+    expect(result.stdout).toContain('fetch-form17 [fund]');
+    expect(result.stdout).toContain('form17 [fund]');
   });
 });

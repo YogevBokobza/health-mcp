@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -107,6 +107,33 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS idx_vaccinations_administered_on ON vaccinations (administered_on)`,
 
+  /**
+   * Form 17 (טופס התחייבות) requests. Keyed by (company_id, request_id) — the
+   * scraper's id is stable across re-fetches of the same request, and the table
+   * answers "where does each request stand" rather than logging every status it
+   * ever had.
+   */
+  `CREATE TABLE IF NOT EXISTS form17_requests (
+     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+     company_id              TEXT NOT NULL,
+     request_id              TEXT NOT NULL,
+     request_type            TEXT NOT NULL,
+     status                  TEXT NOT NULL,
+     submitted_on            TEXT,
+     status_updated_on       TEXT,
+     provider_name           TEXT,
+     appointment_on          TEXT,
+     document_labels         TEXT,
+     can_change_appointment  INTEGER,
+     requires_additional_info INTEGER,
+     raw                     TEXT,
+     first_seen_at           TEXT NOT NULL,
+     updated_at              TEXT NOT NULL,
+     UNIQUE (company_id, request_id)
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_form17_requests_submitted_on ON form17_requests (submitted_on)`,
+
   /** One row per fetch attempt, successful or not — one history per fund per resource. */
   `CREATE TABLE IF NOT EXISTS sync_runs (
      id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,6 +165,7 @@ export const READABLE_TABLES = [
   'appointments',
   'test_results',
   'vaccinations',
+  'form17_requests',
   'sync_runs',
 ] as const;
 

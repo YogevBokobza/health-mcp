@@ -12,6 +12,7 @@ import { replaceMedicationsSnapshot } from '../db/medications.js';
 import { upsertAppointments } from '../db/appointments.js';
 import { upsertTestResults } from '../db/test-results.js';
 import { upsertVaccinations } from '../db/vaccinations.js';
+import { upsertForm17Requests } from '../db/form17.js';
 import { finishSyncRun, startSyncRun, type SyncResource } from '../db/sync-runs.js';
 import { scraperDataDir } from '../config/paths.js';
 
@@ -155,6 +156,24 @@ export async function fetchVaccinationsForFund(
     'vaccinations',
     ['vaccinations'],
     (id, accounts) => upsertVaccinations(id, accounts.flatMap((account) => account.vaccinations ?? [])),
+    options,
+  );
+}
+
+/**
+ * Refreshes Form 17 commitment requests only. Expensive like appointments, not cheap
+ * like medications: the list lazy-loads as the page scrolls and every row must be
+ * expanded before its status, appointment, and document details can be read.
+ */
+export async function fetchForm17ForFund(
+  companyId: HealthFundId,
+  options: Partial<ScraperOptions> = {},
+): Promise<FetchOutcome> {
+  return runFetch(
+    companyId,
+    'form17',
+    ['form17'],
+    (id, accounts) => upsertForm17Requests(id, accounts.flatMap((account) => account.form17 ?? [])),
     options,
   );
 }

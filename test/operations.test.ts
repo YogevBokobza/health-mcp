@@ -21,7 +21,7 @@ function policy(scopes: string[]): ResolvedPolicy {
 }
 
 describe('test-result operations', () => {
-  it('registers exactly the eight supported Maccabi resource operations', () => {
+  it('registers exactly the ten supported Maccabi resource operations', () => {
     expect(maccabiOperations.map((operation) => operation.name)).toEqual([
       'medications.list',
       'medications.refresh',
@@ -31,6 +31,8 @@ describe('test-result operations', () => {
       'testResults.refresh',
       'vaccinations.list',
       'vaccinations.refresh',
+      'form17.list',
+      'form17.refresh',
     ]);
   });
 
@@ -112,5 +114,29 @@ describe('test-result operations', () => {
     expect(toolNameFor(refresh, false)).toBe('testResults_refresh');
     expect(toolNameFor(list, true)).toBe('maccabi_testResults_list');
     expect(toolNameFor(refresh, true)).toBe('maccabi_testResults_refresh');
+  });
+
+  it('classifies and discovers form17 operations as scoped reads', () => {
+    const form17Operations = maccabiOperations.filter((operation) => operation.resource === 'form17');
+    expect(form17Operations.map(({ name, capability, scope }) => ({ name, capability, scope }))).toEqual([
+      { name: 'form17.list', capability: 'read', scope: 'maccabi:form17:read' },
+      { name: 'form17.refresh', capability: 'read', scope: 'maccabi:form17:read' },
+    ]);
+
+    const grant = new PermissionEngine(policy(['maccabi:form17:read']));
+    expect(grant.visibleOperations(maccabiOperations).map((operation) => operation.name)).toEqual([
+      'form17.list',
+      'form17.refresh',
+    ]);
+  });
+
+  it('uses stable unqualified and fund-qualified form17 tool names', () => {
+    const list = maccabiOperations.find((operation) => operation.name === 'form17.list')!;
+    const refresh = maccabiOperations.find((operation) => operation.name === 'form17.refresh')!;
+
+    expect(toolNameFor(list, false)).toBe('form17_list');
+    expect(toolNameFor(refresh, false)).toBe('form17_refresh');
+    expect(toolNameFor(list, true)).toBe('maccabi_form17_list');
+    expect(toolNameFor(refresh, true)).toBe('maccabi_form17_refresh');
   });
 });
