@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import {
   HealthFundTypes,
   type Appointment,
+  type Form17Request,
   type Medication,
   type TestResult,
   type Vaccination,
@@ -28,6 +29,7 @@ const { startSyncRun, finishSyncRun, lastSyncRun } = await import('../../src/db/
 const { runSafeQuery, listTables, describeTable } = await import('../../src/db/query.js');
 const { upsertTestResults, listTestResults } = await import('../../src/db/test-results.js');
 const { upsertVaccinations, listVaccinations } = await import('../../src/db/vaccinations.js');
+const { upsertForm17Requests, listForm17Requests } = await import('../../src/db/form17.js');
 const { operationsFor } = await import('../../src/operations.js');
 
 function medication(overrides: Partial<Medication> = {}): Medication {
@@ -465,6 +467,123 @@ describe('vaccinations', () => {
       'age_at_administration',
     );
     expect(runSafeQuery('SELECT vaccination_id FROM vaccinations').rowCount).toBeGreaterThan(0);
+  });
+});
+
+describe('form17 requests', () => {
+  const form17Request = (overrides: Partial<Form17Request> = {}): Form17Request => ({
+    id: 'fictional-form17-1',
+    requestType: 'טופס 17 בדיוני',
+    status: 'אושר',
+    submittedOn: '2026-06-01',
+    statusUpdatedOn: '2026-06-05',
+    providerName: 'ד"ר דמיון בלבד',
+    appointmentOn: '2026-07-01',
+    documentLabels: ['אישור בדיוני'],
+    canChangeAppointment: true,
+    requiresAdditionalInfo: false,
+    provider: HealthFundTypes.maccabi,
+    ...overrides,
+  });
+
+  it('upserts a fund-isolated snapshot and removes requests absent from the next snapshot', () => {
+    upsertForm17Requests(HealthFundTypes.maccabi, [
+      form17Request(),
+      form17Request({ id: 'fictional-form17-2', submittedOn: '2025-03-04' }),
+    ]);
+    upsertForm17Requests(HealthFundTypes.clalit, [
+      form17Request({ id: 'fictional-clalit-form17', provider: HealthFundTypes.clalit }),
+    ]);
+
+    expect(
+      upsertForm17Requests(HealthFundTypes.maccabi, [
+        form17Request({ status: 'בטיפול', canChangeAppointment: null }),
+      ]),
+    ).toBe(1);
+    expect(listForm17Requests({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({
+        request_id: 'fictional-form17-1',
+        status: 'בטיפול',
+        can_change_appointment: null,
+        requires_additional_info: 0,
+      }),
+    ]);
+    expect(listForm17Requests({ companyId: HealthFundTypes.clalit })).toHaveLength(1);
+  });
+
+  it('deduplicates duplicate IDs using the last occurrence and reports unique rows', () => {
+    const duplicateId = 'fictional-form17-duplicate';
+    const uniqueCount = upsertForm17Requests(HealthFundTypes.maccabi, [
+      form17Request({ id: duplicateId, providerName: 'ספק ראשון' }),
+      form17Request({ id: 'fictional-form17-distinct', submittedOn: '2025-02-03' }),
+      form17Request({ id: duplicateId, providerName: 'ספק אחרון' }),
+    ]);
+
+    expect(uniqueCount).toBe(2);
+    expect(listForm17Requests({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({ request_id: duplicateId, provider_name: 'ספק אחרון' }),
+      expect.objectContaining({ request_id: 'fictional-form17-distinct' }),
+    ]);
+  });
+
+  it('preserves first_seen_at across an update and stores document labels as JSON', () => {
+    upsertForm17Requests(HealthFundTypes.maccabi, [form17Request()]);
+    const before = listForm17Requests({ companyId: HealthFundTypes.maccabi })[0]!.first_seen_at;
+
+    upsertForm17Requests(HealthFundTypes.maccabi, [
+      form17Request({ documentLabels: ['מסמך א', 'מסמך ב'] }),
+    ]);
+
+    const row = listForm17Requests({ companyId: HealthFundTypes.maccabi })[0]!;
+    expect(row.first_seen_at).toBe(before);
+    expect(JSON.parse(row.document_labels!)).toEqual(['מסמך א', 'מסמך ב']);
+  });
+
+  it('does not store a fictional form17 request type in plaintext on disk', () => {
+    const requestType = 'טופס הצפנה בדיוני';
+    upsertForm17Requests(HealthFundTypes.maccabi, [form17Request({ requestType })]);
+    closeDatabase();
+    const raw = fs.readFileSync(path.join(tempDir, 'database.db'));
+    expect(raw.includes(Buffer.from(requestType))).toBe(false);
+    openDatabase();
+  });
+
+  it('orders newest submitted first and exposes form17_requests to safe SQL queries', () => {
+    upsertForm17Requests(HealthFundTypes.maccabi, [
+      form17Request({ id: 'fictional-form17-old', submittedOn: '2024-01-02' }),
+      form17Request({ id: 'fictional-form17-new', submittedOn: '2026-07-20' }),
+    ]);
+
+    expect(
+      listForm17Requests({ companyId: HealthFundTypes.maccabi }).map((row) => row.request_id),
+    ).toEqual(['fictional-form17-new', 'fictional-form17-old']);
+    expect(listTables()).toContainEqual({ name: 'form17_requests', rowCount: 3 });
+    expect(describeTable('form17_requests').columns.map((column) => column.name)).toContain(
+      'requires_additional_info',
+    );
+    expect(runSafeQuery('SELECT request_id FROM form17_requests').rowCount).toBeGreaterThan(0);
+  });
+
+  it('returns form17 freshness from the production list operation', async () => {
+    upsertForm17Requests(HealthFundTypes.maccabi, [form17Request()]);
+    const runId = startSyncRun(HealthFundTypes.maccabi, 'form17');
+    finishSyncRun(runId, { success: true, recordCount: 1 });
+
+    try {
+      const listOperation = operationsFor(HealthFundTypes.maccabi).find(
+        (operation) => operation.name === 'form17.list',
+      );
+      expect(listOperation).toBeDefined();
+
+      const result = (await listOperation!.run({})) as {
+        items: { request_id: string }[];
+        lastSync: { success: boolean } | null;
+      };
+      expect(result.items).toContainEqual(expect.objectContaining({ request_id: 'fictional-form17-1' }));
+      expect(result.lastSync).toMatchObject({ success: true });
+    } finally {
+      openDatabase().prepare('DELETE FROM sync_runs WHERE id = ?').run(runId);
+    }
   });
 });
 

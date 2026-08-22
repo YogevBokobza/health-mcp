@@ -16,8 +16,14 @@ import {
 import { listMedications } from '../db/medications.js';
 import { listTestResults } from '../db/test-results.js';
 import { listVaccinations } from '../db/vaccinations.js';
+import { listForm17Requests } from '../db/form17.js';
 import { lastSyncRun } from '../db/sync-runs.js';
-import { fetchFunds, fetchTestResultsForFund, fetchVaccinationsForFund } from '../sync/fetch.js';
+import {
+  fetchFunds,
+  fetchForm17ForFund,
+  fetchTestResultsForFund,
+  fetchVaccinationsForFund,
+} from '../sync/fetch.js';
 import { writeClaudeConfig } from './configure-claude.js';
 
 process.env.IHS_DATA_DIR ??= scraperDataDir();
@@ -44,9 +50,11 @@ Commands:
   fetch [fund...]               Fetch and store data (defaults to every configured fund)
   fetch-test-results [fund]     Fetch and store test results (one fund only)
   fetch-vaccinations [fund]     Fetch and store vaccinations (one fund only)
+  fetch-form17 [fund]           Fetch and store Form 17 requests (one fund only)
   medications [fund]            Print stored prescriptions
   test-results [fund]           Print stored test results, newest first
   vaccinations [fund]           Print stored vaccinations, newest first
+  form17 [fund]                 Print stored Form 17 requests, newest first
   status                        Where data lives and when each fund last synced
   configure-claude              Add this server to Claude Desktop's config
 
@@ -209,6 +217,34 @@ function vaccinations(args: string[]): void {
   }
 }
 
+async function fetchForm17(args: string[]): Promise<void> {
+  const companyId = (args.find((arg) => !arg.startsWith('-')) ?? 'maccabi') as HealthFundId;
+  requireCredentials(companyId);
+  const outcome = await fetchForm17ForFund(companyId, { verbose: args.includes('--verbose') });
+  stdout.write(
+    outcome.success
+      ? `${outcome.companyId}: ${outcome.recordCount} records\n`
+      : `${outcome.companyId}: FAILED — ${outcome.errorType}: ${outcome.errorMessage}\n`,
+  );
+  if (!outcome.success) process.exitCode = 1;
+}
+
+function form17(args: string[]): void {
+  const companyId = args.find((arg) => !arg.startsWith('-')) as HealthFundId | undefined;
+  const rows = listForm17Requests(companyId ? { companyId } : {});
+  if (rows.length === 0) {
+    stdout.write('No stored Form 17 requests. Run: health-mcp fetch-form17\n');
+    return;
+  }
+  for (const row of rows) {
+    const documents = JSON.parse(row.document_labels ?? '[]') as string[];
+    const appointment = row.appointment_on ? ` appointment ${row.appointment_on}` : '';
+    stdout.write(
+      `${(row.submitted_on ?? '—').padEnd(12)} ${row.request_type.padEnd(20)} ${row.status}${appointment}${documents.length > 0 ? ` [${documents.join(', ')}]` : ''}\n`,
+    );
+  }
+}
+
 function status(): void {
   stdout.write(`data directory: ${appDataDir()}\n`);
   stdout.write(`database:       ${databasePath()}${databaseExists() ? '' : ' (not created yet)'}\n`);
@@ -264,6 +300,9 @@ async function main(): Promise<void> {
     case 'fetch-vaccinations':
       await fetchVaccinations(args);
       break;
+    case 'fetch-form17':
+      await fetchForm17(args);
+      break;
     case 'medications':
       medications(args);
       break;
@@ -272,6 +311,9 @@ async function main(): Promise<void> {
       break;
     case 'vaccinations':
       vaccinations(args);
+      break;
+    case 'form17':
+      form17(args);
       break;
     case 'status':
       status();

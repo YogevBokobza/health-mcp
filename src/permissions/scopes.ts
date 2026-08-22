@@ -20,8 +20,8 @@ export type Resource =
   | 'appointments'
   | 'testResults'
   | 'vaccinations'
+  | 'form17'
   | 'messages'
-  | 'commitments'
   /** The local store itself, reachable without naming a fund. */
   | 'database';
 

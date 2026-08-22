@@ -22,10 +22,16 @@ dump in `data/diagnostics/`, never guess blind.
 
 - **testResults** — complete. `TestsResults/lobby/` (list) and
   `TestsResults/latest/`; shipped as a list-only resource.
-- **vaccinations** — in progress. `Vaccinations/Lobby/`; the Health-MCP
-  storage and access layer is implemented, but live calibration and the remote
-  scraper dependency lock remain pending.
-- **pastVisits** — next after vaccinations completes. `PastVisits/Lobby/`. List-only.
+- **vaccinations** — complete. `Vaccinations/Lobby/`; calibrated in
+  israeli-health-scrapers v0.2.0 and wired here (storage, fetch, operations,
+  CLI) against that release.
+- **form17 (read half)** — complete, arrived early from Phase 4.
+  `requestsAndApprovals/StatusRequest/Lobby/?caseFilter=53,1,2` — the status
+  of existing commitment/refund requests turned out to be a plain read with
+  no dependency on the write flows, so it moved up. The write half (new
+  commitment requests) stays in Phase 4. Expensive like appointments: the
+  timeline lazy-loads on scroll and every row must be expanded.
+- **pastVisits** — next. `PastVisits/Lobby/`. List-only.
 - **visitSummaries** — `VisitSummary/Lobby/`. May need a per-row detail click
   for the full summary text, same pattern as appointments' clinic/instructions
   — check the list view first before assuming a detail page is needed.
@@ -70,11 +76,8 @@ audit log entry) is working end to end against a real account.
 - `appointmentOrder/NewAppointment/` — book/reschedule/cancel an appointment.
 - `requestsAndApprovals/RefundRequest/TopicSelect/` — new refund request.
 - `requestsAndApprovals/ObligationRequest/Triage/` — new commitment
-  (טופס 17) request.
-- `requestsAndApprovals/StatusRequest/Lobby/` — status of existing
-  refund/commitment requests (this half is a cheap read — could move to
-  Phase 2 if it turns out to be a simple list with no dependency on the write
-  flows above).
+  (טופס 17) request. (Reading the status of existing requests already
+  shipped early in Phase 1 as `form17`.)
 
 Expect each of these to be its own multi-screen calibration project, like the
 login SPA and the password-link screen were — topic pickers, doctor

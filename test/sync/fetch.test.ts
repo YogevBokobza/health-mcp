@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Medication, ScraperOptions, TestResult, Vaccination } from 'israeli-health-scrapers';
+import type { Form17Request, Medication, ScraperOptions, TestResult, Vaccination } from 'israeli-health-scrapers';
 
 const scraperFactory = vi.hoisted(() => vi.fn());
 
@@ -21,9 +21,15 @@ const { closeDatabase, openDatabase } = await import('../../src/db/database.js')
 const { saveCredentials } = await import('../../src/db/credentials.js');
 const { listTestResults } = await import('../../src/db/test-results.js');
 const { listVaccinations } = await import('../../src/db/vaccinations.js');
+const { listForm17Requests } = await import('../../src/db/form17.js');
 const { listMedications, upsertMedications } = await import('../../src/db/medications.js');
 const { lastSyncRun } = await import('../../src/db/sync-runs.js');
-const { fetchFund, fetchTestResultsForFund, fetchVaccinationsForFund } = await import('../../src/sync/fetch.js');
+const {
+  fetchFund,
+  fetchForm17ForFund,
+  fetchTestResultsForFund,
+  fetchVaccinationsForFund,
+} = await import('../../src/sync/fetch.js');
 
 const fictionalResult: TestResult = {
   id: 'fictional-sync-result',
@@ -58,6 +64,7 @@ beforeEach(() => {
   scraperFactory.mockReset();
   openDatabase().prepare('DELETE FROM test_results').run();
   openDatabase().prepare('DELETE FROM medications').run();
+  openDatabase().prepare('DELETE FROM form17_requests').run();
   openDatabase().prepare('DELETE FROM sync_runs').run();
 });
 
@@ -130,6 +137,65 @@ describe('fetchVaccinationsForFund', () => {
     expect(lastSyncRun(HealthFundTypes.maccabi, 'vaccinations')).toMatchObject({
       success: 0,
       error_message: 'fictional vaccination credentials rejected',
+    });
+  });
+});
+
+describe('fetchForm17ForFund', () => {
+  const form17Request: Form17Request = {
+    id: 'fictional-sync-form17',
+    requestType: 'טופס 17 סנכרון בדיוני',
+    status: 'בטיפול',
+    submittedOn: '2026-07-01',
+    statusUpdatedOn: '2026-07-05',
+    providerName: 'ד״ר טופס בדיוני',
+    appointmentOn: '2026-08-01',
+    documentLabels: ['מסמך סנכרון'],
+    canChangeAppointment: true,
+    requiresAdditionalInfo: false,
+    provider: HealthFundTypes.maccabi,
+  };
+
+  it('requests only form17, stores the flattened snapshot, and records success', async () => {
+    scraperFactory.mockReturnValue({
+      scrape: vi.fn().mockResolvedValue({
+        success: true,
+        accounts: [{ provider: HealthFundTypes.maccabi, medications: [], form17: [form17Request] }],
+      }),
+    });
+
+    await expect(fetchForm17ForFund(HealthFundTypes.maccabi)).resolves.toMatchObject({
+      success: true,
+      recordCount: 1,
+    });
+    expect(scraperFactory).toHaveBeenCalledWith(expect.objectContaining({ fetch: ['form17'] }));
+    expect(listForm17Requests({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({
+        request_id: form17Request.id,
+        status: 'בטיפול',
+        can_change_appointment: 1,
+      }),
+    ]);
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'form17')).toMatchObject({ success: 1, record_count: 1 });
+  });
+
+  it('returns scraper failures and records finished failure history', async () => {
+    scraperFactory.mockReturnValue({
+      scrape: vi.fn().mockResolvedValue({
+        success: false,
+        errorType: ScraperErrorTypes.TwoFactorRetrieverMissing,
+        errorMessage: 'fictional form17 session gone',
+      }),
+    });
+
+    await expect(fetchForm17ForFund(HealthFundTypes.maccabi)).resolves.toMatchObject({
+      success: false,
+      recordCount: 0,
+      errorType: ScraperErrorTypes.TwoFactorRetrieverMissing,
+    });
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'form17')).toMatchObject({
+      success: 0,
+      error_message: expect.stringContaining('health-mcp login'),
     });
   });
 });

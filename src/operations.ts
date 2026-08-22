@@ -7,10 +7,12 @@ import { listMedications } from './db/medications.js';
 import { listAppointments } from './db/appointments.js';
 import { listTestResults } from './db/test-results.js';
 import { listVaccinations } from './db/vaccinations.js';
+import { listForm17Requests } from './db/form17.js';
 import { lastSyncRun } from './db/sync-runs.js';
 import { describeTable, listTables, runSafeQuery } from './db/query.js';
 import {
   fetchAppointmentsForFund,
+  fetchForm17ForFund,
   fetchFund,
   fetchTestResultsForFund,
   fetchVaccinationsForFund,
@@ -246,6 +248,52 @@ function vaccinationsRefreshOperation(companyId: HealthFundId): Operation {
   };
 }
 
+function form17ListOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'form17.list',
+    companyId,
+    resource: 'form17',
+    capability: 'read',
+    scope: scope(companyId, 'form17', 'read'),
+    title: `רשימת בקשות טופס 17 (התחייבויות) ב${SCRAPERS[companyId].name} מהאחסון המקומי, כולל סטטוס הבקשה, תאריכים, גורם מטפל ומסמכים. לא ניגש לאתר — הרץ form17.refresh כדי לעדכן.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      const items = listForm17Requests({ companyId });
+      const sync = lastSyncRun(companyId, 'form17');
+      return {
+        items,
+        lastSync: sync
+          ? {
+              at: sync.finished_at ?? sync.started_at,
+              success: sync.success === 1,
+              errorType: sync.error_type,
+            }
+          : null,
+      };
+    },
+  };
+}
+
+function form17RefreshOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'form17.refresh',
+    companyId,
+    resource: 'form17',
+    capability: 'read',
+    scope: scope(companyId, 'form17', 'read'),
+    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת בקשות טופס 17 באחסון המקומי. איטי יותר מ-medications.refresh: גולל את כל רשימת הבקשות ופותח כל שורה לפרטיה.`,
+    input: z.object({}).default({}),
+
+    async run() {
+      // Kept as its own operation for the same reason as appointments.refresh: the
+      // list lazy-loads on scroll and every row must be expanded for its details, so
+      // this costs meaningfully more than a list-only fetch.
+      return fetchForm17ForFund(companyId);
+    },
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Database operations, following asher-mcp's shape                            */
 /* -------------------------------------------------------------------------- */
@@ -303,6 +351,8 @@ export function operationsFor(companyId: HealthFundId): Operation[] {
     testResultsRefreshOperation(companyId),
     vaccinationsListOperation(companyId),
     vaccinationsRefreshOperation(companyId),
+    form17ListOperation(companyId),
+    form17RefreshOperation(companyId),
   ];
 }
 

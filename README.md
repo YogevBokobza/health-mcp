@@ -11,9 +11,9 @@ permissions, and the agent protocol.
 
 Nothing is sent anywhere. There is no server, no account, no telemetry.
 
-**Status:** early. Maccabi medications, appointments, and test results work end to end
-against the local store. Vaccinations storage and access are implemented, but live calibration
-and the remote scraper dependency lock are still pending. Other funds are declared in the
+**Status:** early. Maccabi medications, appointments, test results, vaccinations, and
+Form 17 (טופס 17) commitment-request status work end to end (scrapers calibrated
+against a live account, library pinned at v0.2.0). Other funds are declared in the
 library but not implemented yet.
 
 ## Why not just give the agent a browser
@@ -125,11 +125,13 @@ Inspect it locally first with `npm run start:mcp:inspector`.
 | `testResults_refresh` | Log into the fund and refresh test results | `<fund>:testResults:read` |
 | `vaccinations_list` | Vaccination history from the local store, with `lastSync` | `<fund>:vaccinations:read` |
 | `vaccinations_refresh` | Log into the fund and refresh vaccinations | `<fund>:vaccinations:read` |
+| `form17_list` | Form 17 (טופס 17) commitment-request status from the local store, with `lastSync` | `<fund>:form17:read` |
+| `form17_refresh` | Log into the fund and refresh Form 17 requests (each row expanded for its details) | `<fund>:form17:read` |
 | `db_listTables` | Readable tables and row counts | `local:database:read` |
 | `db_describeTable` | Columns, types, keys | `local:database:read` |
 | `db_sqlQuery` | A single read-only SELECT | `local:database:read` |
 
-`medications_list`/`appointments_list`/`testResults_list`/`vaccinations_list` return `lastSync` alongside the
+`medications_list`/`appointments_list`/`testResults_list`/`vaccinations_list`/`form17_list` return `lastSync` alongside the
 data rather than hiding it behind another tool: a list is misleading without knowing how
 old it is. `lastSync.at` is the most recent attempt's completion time (or start time if it
 is still running), `success` says whether that attempt succeeded, and `errorType` records
@@ -235,6 +237,8 @@ health-mcp fetch-test-results [fund]
 health-mcp test-results [fund]
 health-mcp fetch-vaccinations [fund]
 health-mcp vaccinations [fund]
+health-mcp fetch-form17 [fund]
+health-mcp form17 [fund]
 health-mcp status
 health-mcp configure-claude
 ```
@@ -244,8 +248,9 @@ Maccabi), while `test-results [fund]` prints the locally stored results newest f
 MCP `testResults_list`/`testResults_refresh` tools provide the same local-list/remote-refresh
 split for agents. `fetch-vaccinations [fund]` and `vaccinations [fund]` provide equivalent
 vaccination refresh/list access, with `vaccinations_list`/`vaccinations_refresh` available
-to agents. Appointments currently has no CLI path; use the
-`appointments_list`/`appointments_refresh` MCP tools.
+to agents, and `fetch-form17 [fund]`/`form17 [fund]` the same for Form 17 requests
+(`form17_list`/`form17_refresh` for agents). Appointments currently has no CLI path; use
+the `appointments_list`/`appointments_refresh` MCP tools.
 
 ## Tests
 
@@ -267,7 +272,8 @@ that the database file holds no plaintext. No account or network needed.
 ## Roadmap
 
 Appointments are read-only so far (list/refresh); search and booking are still open.
-Messages to a doctor, commitment forms (טופס 17), background monitoring for expiring
+Reading Form 17 commitment-request status shipped; *submitting* new commitment or
+refund requests is still open. Messages to a doctor, background monitoring for expiring
 prescriptions, and the remaining funds — each arriving as a scraper in the library and
 an operation here. Full ordered plan, resource by resource: [docs/roadmap.md](docs/roadmap.md).
 
