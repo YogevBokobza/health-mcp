@@ -51,6 +51,7 @@ function fictionalMedication(overrides: Partial<Medication> = {}): Medication {
     refillsRemaining: null,
     daysUntilExpiry: 17,
     status: 'expiring_soon',
+    isStanding: false,
     provider: HealthFundTypes.maccabi,
     ...overrides,
   };

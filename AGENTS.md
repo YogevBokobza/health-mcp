@@ -83,8 +83,14 @@ running forever) until `auth_complete` redeems the code via
 *execution* (`authorize()`, re-checked on every call). Either alone is insufficient —
 discovery-only filtering is a presentation detail a hand-written call walks straight
 past; execution-only checking leaks the shape of everything that exists to anyone who
-lists tools. A write matching a profile's `requireConfirmation` patterns doesn't run on
-the first call: it returns a preview and a one-shot token bound to that *exact*
+lists tools. Capabilities form a one-way lattice: `sensitive_read` — the tier for data
+behind a second, more private decision than its resource's plain `read` (the measured
+values behind a test-results timeline, say) — includes `read` for the same fund and
+resource, never the reverse, so `*:*:read` does not reach a `sensitive_read` operation
+while `maccabi:testResults:*` does; the implication is applied in scope matching
+(`grantsScope` in `src/permissions/scopes.ts`) so it holds at both enforcement points.
+A write matching a profile's `requireConfirmation` patterns doesn't run on the
+first call: it returns a preview and a one-shot token bound to that *exact*
 operation and input hash (`hashInput` in `src/permissions/audit.ts`), and only a second
 call carrying that token executes — the binding is what stops a token issued for one
 preview being redeemed against different input. `HEALTH_MCP_MODE=readonly` is a global

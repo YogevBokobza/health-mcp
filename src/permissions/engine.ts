@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { anyScopeMatches, type Scope } from './scopes.js';
+import { anyScopeMatches, grantsScope, type Scope } from './scopes.js';
 import { resolvePolicy, type ResolvedPolicy } from './config.js';
 import { hashInput, writeAudit, type AuditOutcome } from './audit.js';
 import { CONFIRMATION_TTL_MS } from '../constants.js';
@@ -65,7 +65,7 @@ export class PermissionEngine {
   /** Whether this operation may appear in a tool listing at all. */
   canDiscover(operation: Operation): boolean {
     if (this.policy.readOnlyMode && operation.capability === 'write') return false;
-    return anyScopeMatches(this.policy.profile.scopes, operation.scope);
+    return grantsScope(this.policy.profile.scopes, operation.scope);
   }
 
   visibleOperations<T extends Operation>(all: readonly T[]): T[] {
@@ -162,7 +162,7 @@ export class PermissionEngine {
       );
     }
 
-    if (!anyScopeMatches(this.policy.profile.scopes, operation.scope)) {
+    if (!grantsScope(this.policy.profile.scopes, operation.scope)) {
       await audit('denied', 'scope_not_granted');
       throw new PermissionDeniedError(
         `Profile "${this.policy.profileName}" does not grant ${operation.scope}.`,

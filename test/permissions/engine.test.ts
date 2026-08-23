@@ -99,6 +99,68 @@ describe('execution', () => {
   });
 });
 
+describe('sensitive_read', () => {
+  const testResultRead = operation({
+    name: 'testResults.list',
+    resource: 'testResults',
+    scope: 'maccabi:testResults:read',
+  });
+  const testResultSensitive = operation({
+    name: 'testResults.values',
+    resource: 'testResults',
+    capability: 'sensitive_read',
+    scope: 'maccabi:testResults:sensitive_read',
+  });
+
+  it('includes read for the same fund and resource', async () => {
+    const engine = new PermissionEngine(policy({ scopes: ['maccabi:testResults:sensitive_read'] }));
+
+    expect(engine.canDiscover(testResultRead)).toBe(true);
+    await expect(engine.authorize(testResultRead, {})).resolves.toBeUndefined();
+  });
+
+  it('is not reached by a plain read grant, at either enforcement point', async () => {
+    const engine = new PermissionEngine(policy({ scopes: ['maccabi:testResults:read'] }));
+
+    expect(engine.canDiscover(testResultSensitive)).toBe(false);
+    await expect(engine.authorize(testResultSensitive, {})).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('is not reached by a read wildcard either — the lattice is one-way', async () => {
+    const engine = new PermissionEngine(policy({ scopes: ['*:*:read'] }));
+
+    expect(engine.canDiscover(testResultSensitive)).toBe(false);
+    await expect(engine.authorize(testResultSensitive, {})).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('is covered by an explicit capability wildcard', async () => {
+    const engine = new PermissionEngine(policy({ scopes: ['maccabi:testResults:*'] }));
+
+    expect(engine.canDiscover(testResultSensitive)).toBe(true);
+    await expect(engine.authorize(testResultSensitive, {})).resolves.toBeUndefined();
+  });
+
+  it('does not leak its read inclusion across resources', async () => {
+    const engine = new PermissionEngine(policy({ scopes: ['maccabi:vaccinations:sensitive_read'] }));
+
+    expect(engine.canDiscover(testResultRead)).toBe(false);
+    await expect(engine.authorize(testResultRead, {})).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('stays visible under read-only mode — it reads, it does not write', () => {
+    const engine = new PermissionEngine(
+      policy({ scopes: ['maccabi:testResults:sensitive_read'] }, true),
+    );
+    expect(engine.canDiscover(testResultSensitive)).toBe(true);
+  });
+});
+
 describe('write confirmation', () => {
   let engine: PermissionEngine;
 
