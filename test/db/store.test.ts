@@ -6,8 +6,10 @@ import {
   HealthFundTypes,
   type Appointment,
   type Form17Request,
+  type HealthDocument,
   type Medication,
   type TestResult,
+  type TestResultValue,
   type Vaccination,
 } from 'israeli-health-scrapers';
 
@@ -27,7 +29,15 @@ const { upsertMedications, replaceMedicationsSnapshot, listMedications } = await
 const { upsertAppointments, listAppointments } = await import('../../src/db/appointments.js');
 const { startSyncRun, finishSyncRun, lastSyncRun } = await import('../../src/db/sync-runs.js');
 const { runSafeQuery, listTables, describeTable } = await import('../../src/db/query.js');
-const { upsertTestResults, listTestResults } = await import('../../src/db/test-results.js');
+const {
+  upsertTestResults,
+  storeTestResultDetails,
+  listTestResults,
+  listTestResultValues,
+  countTestResultValues,
+  findTestResultForExport,
+} = await import('../../src/db/test-results.js');
+const { loadDocument } = await import('../../src/store/documents.js');
 const { upsertVaccinations, listVaccinations } = await import('../../src/db/vaccinations.js');
 const { upsertForm17Requests, listForm17Requests } = await import('../../src/db/form17.js');
 const { operationsFor } = await import('../../src/operations.js');
@@ -68,7 +78,13 @@ function testResult(overrides: Partial<TestResult> = {}): TestResult {
     id: 'fictional-result-001',
     testName: fictionalTestResultName,
     performedOn: '2026-07-14',
+    resultedOn: null,
     orderingDoctor: 'ד"ר דמיון בלבד',
+    category: null,
+    kind: 'other',
+    isPartial: false,
+    institute: null,
+    documentAvailable: false,
     provider: HealthFundTypes.maccabi,
     raw: { fictionalTimelineLabel: 'nebula-alpha' },
     ...overrides,
@@ -391,7 +407,17 @@ describe('test results', () => {
       'test_result_id',
       'test_name',
       'performed_on',
+      'resulted_on',
       'ordering_doctor',
+      'category',
+      'kind',
+      'is_partial',
+      'institute',
+      'document_available',
+      'document_path',
+      'document_bytes',
+      'document_sha256',
+      'detailed_at',
       'raw',
       'first_seen_at',
       'updated_at',
@@ -408,6 +434,213 @@ describe('test results', () => {
         test_name: 'בדיקת שאילתה בדיונית',
       },
     ]);
+  });
+});
+
+const fictionalAnalyteName = 'גלוקוז בדיוני';
+
+function testResultValue(overrides: Partial<TestResultValue> = {}): TestResultValue {
+  return {
+    code: 'FICT-1',
+    name: fictionalAnalyteName,
+    group: 'כימיה בדיונית',
+    value: 90,
+    text: null,
+    unit: 'mg/dl',
+    referenceMin: 70,
+    referenceMax: 100,
+    status: 'within',
+    measuredOn: '2026-07-14',
+    ...overrides,
+  };
+}
+
+function fictionalDocument(content = 'fictional pdf bytes, not a real report'): HealthDocument {
+  return {
+    fileName: 'בדיקת דמיון.pdf',
+    contentType: 'application/pdf',
+    byteLength: Buffer.byteLength(content),
+    content: Buffer.from(content).toString('base64'),
+  };
+}
+
+describe('test result details (values and documents)', () => {
+  beforeEach(() => {
+    openDatabase().prepare('DELETE FROM test_result_values').run();
+    openDatabase().prepare('DELETE FROM test_results').run();
+  });
+
+  afterEach(() => {
+    openDatabase().prepare('DELETE FROM test_result_values').run();
+    openDatabase().prepare('DELETE FROM test_results').run();
+  });
+
+  it('stores measured values and reports how many are behind each result', () => {
+    const counts = storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-1', kind: 'lab', values: [testResultValue()] }),
+    ]);
+
+    expect(counts).toEqual({ values: 1, documents: 0 });
+
+    const values = listTestResultValues({ companyId: HealthFundTypes.maccabi });
+    expect(values).toContainEqual(
+      expect.objectContaining({ name: fictionalAnalyteName, value: 90, status: 'within' }),
+    );
+    expect(countTestResultValues({ companyId: HealthFundTypes.maccabi }).get('fictional-detail-1')).toBe(1);
+  });
+
+  it('counts values and documents separately, so a document-only result is not reported as empty', () => {
+    const counts = storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-values-and-doc', kind: 'lab', values: [testResultValue(), testResultValue({ code: 'FICT-2', name: 'אשלגן בדיוני' })] }),
+      testResult({
+        id: 'fictional-detail-doc-only',
+        kind: 'document',
+        documentAvailable: true,
+        document: fictionalDocument(),
+      }),
+    ]);
+
+    expect(counts).toEqual({ values: 2, documents: 1 });
+  });
+
+  it('filters values by analyte name, date range, and out-of-range-only', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({
+        id: 'fictional-detail-filter',
+        kind: 'lab',
+        values: [
+          testResultValue({ name: fictionalAnalyteName, value: 90, status: 'within', measuredOn: '2026-07-14' }),
+          testResultValue({
+            name: 'המוגלובין בדיוני',
+            value: 8,
+            status: 'below',
+            referenceMin: 12,
+            measuredOn: '2026-01-01',
+          }),
+        ],
+      }),
+    ]);
+
+    expect(listTestResultValues({ companyId: HealthFundTypes.maccabi, name: 'גלוקוז' })).toHaveLength(1);
+    expect(
+      listTestResultValues({ companyId: HealthFundTypes.maccabi, from: '2026-06-01' }),
+    ).toHaveLength(1);
+    expect(
+      listTestResultValues({ companyId: HealthFundTypes.maccabi, outOfRangeOnly: true }),
+    ).toEqual([expect.objectContaining({ name: 'המוגלובין בדיוני' })]);
+  });
+
+  it('replaces a batch wholesale on re-fetch, dropping a value the fund withdrew', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({
+        id: 'fictional-detail-replace',
+        kind: 'lab',
+        values: [testResultValue(), testResultValue({ code: 'FICT-2', name: 'אשלגן בדיוני' })],
+      }),
+    ]);
+    expect(listTestResultValues({ companyId: HealthFundTypes.maccabi })).toHaveLength(2);
+
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-replace', kind: 'lab', values: [testResultValue()] }),
+    ]);
+
+    expect(listTestResultValues({ companyId: HealthFundTypes.maccabi })).toHaveLength(1);
+  });
+
+  it('preserves first_seen_at for a value that survives a re-fetch', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-firstseen', kind: 'lab', values: [testResultValue()] }),
+    ]);
+    const before = listTestResultValues({ companyId: HealthFundTypes.maccabi })[0]!.first_seen_at;
+
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-firstseen', kind: 'lab', values: [testResultValue({ value: 95 })] }),
+    ]);
+
+    expect(listTestResultValues({ companyId: HealthFundTypes.maccabi })[0]?.first_seen_at).toBe(before);
+  });
+
+  it('does not delete values when a value fetch was not attempted (values undefined, not empty)', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-untouched', kind: 'lab', values: [testResultValue()] }),
+    ]);
+
+    // A plain timeline upsert never sets `values` at all.
+    upsertTestResults(HealthFundTypes.maccabi, [testResult({ id: 'fictional-detail-untouched', kind: 'lab' })]);
+
+    expect(listTestResultValues({ companyId: HealthFundTypes.maccabi })).toHaveLength(1);
+  });
+
+  it('saves a result document encrypted on disk and records its checksum on the row', () => {
+    const content = 'fictional imaging report content';
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({
+        id: 'fictional-detail-doc',
+        kind: 'document',
+        documentAvailable: true,
+        document: fictionalDocument(content),
+      }),
+    ]);
+
+    const [row] = listTestResults({ companyId: HealthFundTypes.maccabi });
+    expect(row?.document_path).toBeTruthy();
+    expect(row?.document_sha256).toBeTruthy();
+    expect(row?.detailed_at).toBeTruthy();
+
+    const raw = fs.readFileSync(row!.document_path!);
+    expect(raw.includes(Buffer.from(content))).toBe(false);
+    expect(loadDocument(row!.document_path!, row!.document_sha256!).toString('utf8')).toBe(content);
+
+    const forExport = findTestResultForExport(HealthFundTypes.maccabi, 'fictional-detail-doc');
+    expect(forExport).toEqual({ document_path: row!.document_path, document_sha256: row!.document_sha256 });
+  });
+
+  it('marks detailed_at without document fields when the result has no document', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-nodoc', kind: 'lab', values: [] }),
+    ]);
+
+    const [row] = listTestResults({ companyId: HealthFundTypes.maccabi });
+    expect(row?.detailed_at).toBeTruthy();
+    expect(row?.document_path).toBeNull();
+  });
+
+  it('leaves values and document metadata intact after a subsequent plain timeline refresh', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({
+        id: 'fictional-detail-survives-refresh',
+        kind: 'document',
+        documentAvailable: true,
+        document: fictionalDocument(),
+      }),
+    ]);
+    const before = listTestResults({ companyId: HealthFundTypes.maccabi })[0]!;
+    expect(before.document_path).toBeTruthy();
+
+    // The cheap refresh path: re-lists the timeline without touching detail columns.
+    upsertTestResults(HealthFundTypes.maccabi, [
+      testResult({
+        id: 'fictional-detail-survives-refresh',
+        kind: 'document',
+        documentAvailable: true,
+        testName: 'שם מעודכן בדיוני',
+      }),
+    ]);
+
+    const after = listTestResults({ companyId: HealthFundTypes.maccabi })[0]!;
+    expect(after.test_name).toBe('שם מעודכן בדיוני');
+    expect(after.document_path).toBe(before.document_path);
+    expect(after.document_sha256).toBe(before.document_sha256);
+    expect(after.detailed_at).toBe(before.detailed_at);
+  });
+
+  it('is not reachable through the raw-SQL query operation', () => {
+    storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-sql-guard', kind: 'lab', values: [testResultValue()] }),
+    ]);
+
+    expect(() => runSafeQuery('SELECT * FROM test_result_values')).toThrow();
+    expect(listTables().map((table) => table.name)).not.toContain('test_result_values');
   });
 });
 

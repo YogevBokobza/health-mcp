@@ -20,8 +20,14 @@ Do these first, one at a time, live-calibrated the same way appointments was:
 guess selectors → run against the real account → fix from the diagnostics
 dump in `data/diagnostics/`, never guess blind.
 
-- **testResults** — complete. `TestsResults/lobby/` (list) and
-  `TestsResults/latest/`; shipped as a list-only resource.
+- **testResults** — complete, with a second tier. `TestsResults/lobby/` (list)
+  shipped as a list-only resource first; the "likely list-only" guess turned
+  out to be wrong — the rendered timeline omits the ids and per-entry
+  authorization pair the actual values and documents hang off, so the detail
+  tier (`testResults.refreshDetails`/`.values`/`.exportDocument`, gated behind
+  `sensitive_read`) reads the page's own JSON API instead of the DOM. Check a
+  page's own data API before writing a DOM parser for the next resource —
+  it's often cheaper and less brittle than the rendered rows.
 - **vaccinations** — complete. `Vaccinations/Lobby/`; calibrated in
   israeli-health-scrapers v0.2.0 and wired here (storage, fetch, operations,
   CLI) against that release.

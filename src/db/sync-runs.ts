@@ -2,8 +2,21 @@ import type { HealthFundId } from 'israeli-health-scrapers';
 
 import { openDatabase } from './database.js';
 
-/** Which collection a sync run fetched — one row of history per resource per fund. */
-export type SyncResource = 'medications' | 'appointments' | 'testResults' | 'vaccinations' | 'form17';
+/**
+ * Which collection a sync run fetched — one row of history per resource per fund.
+ *
+ * `testResultDetails` is tracked apart from `testResults` because they cost and mean
+ * different things: the timeline can be hours fresh while the values behind it are
+ * weeks old, and a caller deciding whether to trust a stored measurement needs the
+ * second date, not the first.
+ */
+export type SyncResource =
+  | 'medications'
+  | 'appointments'
+  | 'testResults'
+  | 'testResultDetails'
+  | 'vaccinations'
+  | 'form17';
 
 export interface SyncRun {
   id: number;

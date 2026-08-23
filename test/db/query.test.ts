@@ -66,6 +66,15 @@ describe('assertSafeSelect', () => {
     ).toThrow(UnsafeQueryError);
   });
 
+  it('refuses reading the test_result_values table', () => {
+    // The sensitive-scoped `testResults.values` operation is the only path to this
+    // data; a plain `local:database:read` grant must not be able to read around it.
+    expect(() => assertSafeSelect('SELECT * FROM test_result_values')).toThrow(UnsafeQueryError);
+    expect(() =>
+      assertSafeSelect('SELECT name, value FROM test_result_values WHERE status = ?'),
+    ).toThrow(UnsafeQueryError);
+  });
+
   it('refuses enumerating the schema through sqlite internals', () => {
     expect(() => assertSafeSelect('SELECT name FROM sqlite_master')).toThrow(/internal/i);
   });

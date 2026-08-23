@@ -10,13 +10,13 @@ export { openDatabase, closeDatabase, databaseExists, DatabaseKeyError } from '.
 export { saveCredentials, getCredentials, listCredentialedFunds } from './db/credentials.js';
 export { listMedications } from './db/medications.js';
 export { listAppointments } from './db/appointments.js';
-export { listTestResults } from './db/test-results.js';
+export { listTestResults, listTestResultValues, countTestResultValues } from './db/test-results.js';
 export { upsertVaccinations, listVaccinations } from './db/vaccinations.js';
 export { startSyncRun, finishSyncRun, lastSyncRun } from './db/sync-runs.js';
 export { runSafeQuery, assertSafeSelect, listTables, describeTable, UnsafeQueryError } from './db/query.js';
 export type { StoredMedication } from './db/medications.js';
 export type { StoredAppointment } from './db/appointments.js';
-export type { StoredTestResult } from './db/test-results.js';
+export type { StoredTestResult, StoredTestResultValue, StoredTestResultValueRow } from './db/test-results.js';
 export type { StoredVaccination } from './db/vaccinations.js';
 export type { SyncRun, SyncResource } from './db/sync-runs.js';
 
@@ -24,10 +24,21 @@ export {
   fetchFund,
   fetchFunds,
   fetchAppointmentsForFund,
+  fetchTestResultDetailsForFund,
   fetchTestResultsForFund,
   fetchVaccinationsForFund,
 } from './sync/fetch.js';
 export type { FetchOutcome } from './sync/fetch.js';
+
+export {
+  saveDocument,
+  loadDocument,
+  exportDocument,
+  DocumentDecryptError,
+  DocumentIntegrityError,
+  DocumentExistsError,
+} from './store/documents.js';
+export type { StoredDocument } from './store/documents.js';
 
 export { allOperations, operationsFor, findOperation, configuredFunds } from './operations.js';
 export type { Operation } from './operations.js';

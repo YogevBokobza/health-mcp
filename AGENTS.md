@@ -9,11 +9,12 @@ the way [asher-mcp](https://github.com/shlomiuziel/asher-mcp) sits on top of
 repo adds encrypted local storage, a scoped permission model, and the MCP agent protocol.
 Nothing is sent anywhere — no server, no account, no telemetry.
 
-**Status:** early. Maccabi medications, appointments, test results, vaccinations, and
-Form 17 (טופס 17) commitment-request status work end to end (scrapers calibrated
-against a live account, library pinned at v0.3.0). Other funds are declared in the
-library but not implemented yet. Next Maccabi resources to add, in order, with the
-reasoning behind the order: `docs/roadmap.md`.
+**Status:** early. Maccabi medications, appointments, test results (including the
+detail tier: lab values and result documents, gated behind `sensitive_read`),
+vaccinations, and Form 17 (טופס 17) commitment-request status work end to end (scrapers
+calibrated against a live account, library pinned at v0.4.0). Other funds are declared
+in the library but not implemented yet. Next Maccabi resources to add, in order, with
+the reasoning behind the order: `docs/roadmap.md`.
 
 ## Commands
 

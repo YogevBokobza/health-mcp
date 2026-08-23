@@ -46,6 +46,16 @@ export function scraperDataDir(): string {
   return path.join(appDataDir(), 'scraper');
 }
 
+/**
+ * Where one fund's encrypted result/summary documents are stored.
+ *
+ * Per-fund, not per-resource: the documents this app stores all carry the same
+ * sensitivity and the same encryption, so one directory per fund is enough separation.
+ */
+export function documentsDir(companyId: string): string {
+  return path.join(appDataDir(), 'documents', companyId);
+}
+
 /** Creates the app directory with owner-only permissions. */
 export function ensureAppDataDir(): string {
   const dir = appDataDir();

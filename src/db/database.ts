@@ -18,7 +18,7 @@ let handle: DatabaseType | undefined;
  * unlocks. It is supplied per run, which is what keeps an attacker with a copy of the
  * database file from also having the means to open it.
  */
-function encryptionKey(): string {
+export function encryptionKey(): string {
   const key = process.env.HEALTH_MCP_KEY;
 
   if (!key || key.length < 8) {

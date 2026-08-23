@@ -11,10 +11,10 @@ permissions, and the agent protocol.
 
 Nothing is sent anywhere. There is no server, no account, no telemetry.
 
-**Status:** early. Maccabi medications, appointments, test results, vaccinations, and
-Form 17 (טופס 17) commitment-request status work end to end (scrapers calibrated
-against a live account, library pinned at v0.3.0). Other funds are declared in the
-library but not implemented yet.
+**Status:** early. Maccabi medications, appointments, test results (including lab
+values and result documents), vaccinations, and Form 17 (טופס 17) commitment-request
+status work end to end (scrapers calibrated against a live account, library pinned at
+v0.4.0). Other funds are declared in the library but not implemented yet.
 
 ## Why not just give the agent a browser
 
@@ -141,8 +141,11 @@ Inspect it locally first with `npm run start:mcp:inspector`.
 | `medications_refresh` | Log into the fund and refresh the local store | `<fund>:medications:read` |
 | `appointments_list` | Upcoming appointments from the local store, with `lastSync` | `<fund>:appointments:read` |
 | `appointments_refresh` | Log into the fund and refresh appointments (clinic address + pre-visit instructions included) | `<fund>:appointments:read` |
-| `testResults_list` | Test results from the local store, with `lastSync` | `<fund>:testResults:read` |
-| `testResults_refresh` | Log into the fund and refresh test results | `<fund>:testResults:read` |
+| `testResults_list` | Test-results timeline from the local store, with value counts and `lastSync`/`lastDetailSync` | `<fund>:testResults:read` |
+| `testResults_refresh` | Log into the fund and refresh the timeline (one request, no values or documents) | `<fund>:testResults:read` |
+| `testResults_values` | Individual measured lab values, filterable by analyte, date, or out-of-range | `<fund>:testResults:sensitive_read` |
+| `testResults_refreshDetails` | Log into the fund and fetch every lab value and result document (one request per test; optional `since` bound) | `<fund>:testResults:sensitive_read` |
+| `testResults_exportDocument` | Decrypt a stored result document to a chosen path | `<fund>:testResults:sensitive_read` |
 | `vaccinations_list` | Vaccination history from the local store, with `lastSync` | `<fund>:vaccinations:read` |
 | `vaccinations_refresh` | Log into the fund and refresh vaccinations | `<fund>:vaccinations:read` |
 | `form17_list` | Form 17 (טופס 17) commitment-request status from the local store, with `lastSync` | `<fund>:form17:read` |
@@ -163,6 +166,14 @@ operation to fetch newer results.
 more, since the scraper clicks into every appointment's own detail page for its clinic
 address and pre-visit instructions — a caller asking for medications shouldn't pay for
 that.
+
+`testResults_values`, `testResults_refreshDetails`, and `testResults_exportDocument`
+require `sensitive_read`, not `read` — seeing what a test *measured* is one decision
+more private than seeing that it happened. A `sensitive_read` grant includes `read` for
+the same fund and resource (one decision, not two), but a plain `read` grant never
+reaches these three tools, not even in a tool listing. Result documents are stored
+encrypted at rest, opaquely named (no dates, no test names on disk); decryption happens
+only when `testResults_exportDocument` is explicitly called.
 
 The auth tools are always listed regardless of policy — logging in is the precondition
 for everything else, and an agent that cannot see how to re-authenticate has no way to
@@ -240,9 +251,11 @@ You are responsible for your own key and your own machine.
 | Linux | `~/.local/share/HealthMCP` |
 | Windows | `%APPDATA%/HealthMCP` |
 
-Holds `database.db`, `policy.json`, `audit.jsonl`, and `scraper/` (login sessions and
-diagnostics dumps). Override with `HEALTH_MCP_DATA_DIR`. Diagnostics dumps contain page
-HTML from a logged-in medical account — treat that directory accordingly.
+Holds `database.db`, `policy.json`, `audit.jsonl`, `scraper/` (login sessions and
+diagnostics dumps), and `documents/<fund>/` (encrypted test-result documents — a
+separate key derivation from the database's, decrypted only on explicit export).
+Override with `HEALTH_MCP_DATA_DIR`. Diagnostics dumps contain page HTML from a
+logged-in medical account — treat that directory accordingly.
 
 ## CLI
 
@@ -255,6 +268,9 @@ health-mcp fetch [fund...]
 health-mcp medications [fund]
 health-mcp fetch-test-results [fund]
 health-mcp test-results [fund]
+health-mcp fetch-test-result-details [fund] [--since YYYY-MM-DD]
+health-mcp test-result-values [fund] [--test NAME] [--abnormal] [--since YYYY-MM-DD]
+health-mcp export-document <fund> <resultId> <destination> [--overwrite]
 health-mcp fetch-vaccinations [fund]
 health-mcp vaccinations [fund]
 health-mcp fetch-form17 [fund]
@@ -263,10 +279,19 @@ health-mcp status
 health-mcp configure-claude
 ```
 
-`fetch-test-results [fund]` fetches and stores test results for one fund (defaulting to
-Maccabi), while `test-results [fund]` prints the locally stored results newest first. The
-MCP `testResults_list`/`testResults_refresh` tools provide the same local-list/remote-refresh
-split for agents. `fetch-vaccinations [fund]` and `vaccinations [fund]` provide equivalent
+`fetch-test-results [fund]` fetches and stores the test-results timeline for one fund
+(defaulting to Maccabi), while `test-results [fund]` prints the locally stored results
+newest first. `fetch-test-result-details [fund]` is the expensive tier — one request per
+test — fetching every lab value and result document (encrypted to disk); bound it with
+`--since` to fetch only recent results. `test-result-values [fund]` prints stored lab
+values, filterable by `--test` (analyte substring), `--since` (date), and `--abnormal`
+(out-of-range only). `export-document <fund> <resultId> <destination>` decrypts one
+stored document to a chosen path, refusing to overwrite an existing file unless
+`--overwrite` is passed. The MCP tools mirror this one-to-one:
+`testResults_list`/`testResults_refresh` for the cheap tier,
+`testResults_values`/`testResults_refreshDetails`/`testResults_exportDocument` (all
+`sensitive_read`) for the expensive one. `fetch-vaccinations [fund]` and
+`vaccinations [fund]` provide equivalent
 vaccination refresh/list access, with `vaccinations_list`/`vaccinations_refresh` available
 to agents, and `fetch-form17 [fund]`/`form17 [fund]` the same for Form 17 requests
 (`form17_list`/`form17_refresh` for agents). Appointments currently has no CLI path; use

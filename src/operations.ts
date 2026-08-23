@@ -5,7 +5,13 @@ import { scope, type Capability, type Resource, type Scope } from './permissions
 import { listCredentialedFunds } from './db/credentials.js';
 import { listMedications } from './db/medications.js';
 import { listAppointments } from './db/appointments.js';
-import { listTestResults } from './db/test-results.js';
+import {
+  countTestResultValues,
+  findTestResultForExport,
+  listTestResultValues,
+  listTestResults,
+} from './db/test-results.js';
+import { exportDocument } from './store/documents.js';
 import { listVaccinations } from './db/vaccinations.js';
 import { listForm17Requests } from './db/form17.js';
 import { lastSyncRun, type SyncResource } from './db/sync-runs.js';
@@ -15,6 +21,7 @@ import {
   fetchAppointmentsForFund,
   fetchForm17ForFund,
   fetchFund,
+  fetchTestResultDetailsForFund,
   fetchTestResultsForFund,
   fetchVaccinationsForFund,
 } from './sync/fetch.js';
@@ -162,6 +169,32 @@ function appointmentsRefreshOperation(companyId: HealthFundId): Operation {
   };
 }
 
+const isoDateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected an ISO date (YYYY-MM-DD)');
+
+/**
+ * Row bounds for the analyte-level view.
+ *
+ * A decade of results is a few thousand measurements, so the default is generous
+ * enough that an ordinary question is answered in full, and the operation says when it
+ * was not.
+ */
+const DEFAULT_VALUE_ROWS = 1_000;
+const MAX_VALUE_ROWS = 5_000;
+
+const listTestResultsInput = z
+  .object({
+    from: isoDateInput.optional().describe('Only results performed on or after this date.'),
+    to: isoDateInput.optional().describe('Only results performed on or before this date.'),
+    kind: z
+      .enum(['lab', 'document', 'imaging', 'other'])
+      .optional()
+      .describe(
+        'lab = measured values; document = a report file; imaging = films held in the fund viewer.',
+      ),
+    withDocument: z.boolean().optional().describe('Only results whose file is stored locally.'),
+  })
+  .default({});
+
 function testResultsListOperation(companyId: HealthFundId): Operation {
   return {
     name: 'testResults.list',
@@ -169,13 +202,23 @@ function testResultsListOperation(companyId: HealthFundId): Operation {
     resource: 'testResults',
     capability: 'read',
     scope: scope(companyId, 'testResults', 'read'),
-    title: `רשימת רשומות בדיקות ב${SCRAPERS[companyId].name} מהאחסון המקומי, כולל שם הבדיקה, מועד הביצוע והרופא המפנה כשזמינים. לא ניגש לאתר — הרץ testResults.refresh כדי לעדכן.`,
-    input: z.object({}).default({}),
+    title: `רשימת רשומות בדיקות ב${SCRAPERS[companyId].name} מהאחסון המקומי: שם הבדיקה, מועד הביצוע, הרופא המפנה, כמה ערכי מעבדה נשמרו לכל רשומה, והאם קיים קובץ תוצאה מקומי. לא ניגש לאתר — הרץ testResults.refresh לעדכון הרשימה, או testResults.refreshDetails (דורש הרשאת sensitive_read) כדי להוריד ערכים ומסמכים.`,
+    input: listTestResultsInput,
 
-    async run() {
+    async run(input) {
+      const parsed = input as z.infer<typeof listTestResultsInput>;
+      const items = listTestResults({ companyId, ...parsed });
+      const valueCounts = countTestResultValues({ companyId });
+
       return {
-        items: listTestResults({ companyId }),
+        items: items.map((item) => ({
+          ...item,
+          value_count: valueCounts.get(item.test_result_id) ?? 0,
+        })),
         lastSync: lastSyncPayload(companyId, 'testResults'),
+        // Reported separately: the timeline can be fresh while the results behind it
+        // are old, and only one of those two dates is about the numbers.
+        lastDetailSync: lastSyncPayload(companyId, 'testResultDetails'),
       };
     },
   };
@@ -188,11 +231,113 @@ function testResultsRefreshOperation(companyId: HealthFundId): Operation {
     resource: 'testResults',
     capability: 'read',
     scope: scope(companyId, 'testResults', 'read'),
-    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת רשומות הבדיקות באחסון המקומי.`,
+    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת רשומות הבדיקות באחסון המקומי. מהיר — בקשה אחת, ללא ערכים וללא מסמכים.`,
     input: z.object({}).default({}),
 
     async run() {
       return fetchTestResultsForFund(companyId);
+    },
+  };
+}
+
+const refreshTestResultDetailsInput = z
+  .object({
+    since: isoDateInput
+      .optional()
+      .describe('Only fetch values and documents for results performed on or after this date.'),
+  })
+  .default({});
+
+function testResultsRefreshDetailsOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'testResults.refreshDetails',
+    companyId,
+    resource: 'testResults',
+    capability: 'sensitive_read',
+    scope: scope(companyId, 'testResults', 'sensitive_read'),
+    title: `התחברות ל${SCRAPERS[companyId].name} והורדת התוצאות עצמן: כל ערכי המעבדה (ערך, יחידה וטווח ייחוס) וכל מסמכי התוצאה, מוצפנים באחסון המקומי. איטי — בקשה לכל בדיקה בנפרד; העבר since כדי לעדכן רק בדיקות מתאריך מסוים.`,
+    input: refreshTestResultDetailsInput,
+
+    async run(input) {
+      const { since } = input as z.infer<typeof refreshTestResultDetailsInput>;
+      return fetchTestResultDetailsForFund(companyId, since ? { since } : {});
+    },
+  };
+}
+
+const listTestResultValuesInput = z
+  .object({
+    name: z.string().optional().describe('Substring of the analyte name, case-insensitive, e.g. "ferritin".'),
+    from: isoDateInput.optional(),
+    to: isoDateInput.optional(),
+    outOfRangeOnly: z.boolean().optional().describe('Only values that fell below or above their reference range.'),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_VALUE_ROWS)
+      .optional()
+      .describe(`Maximum rows to return. Defaults to ${DEFAULT_VALUE_ROWS}.`),
+  })
+  .default({});
+
+function testResultValuesOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'testResults.values',
+    companyId,
+    resource: 'testResults',
+    capability: 'sensitive_read',
+    scope: scope(companyId, 'testResults', 'sensitive_read'),
+    title: `ערכי בדיקות מעבדה בודדים מהאחסון המקומי, מהחדש לישן: שם הבדיקה, הערך, היחידה, טווח הייחוס והאם הערך חרג ממנו. מיועד למעקב אחרי בדיקה לאורך זמן (name) או לאיתור חריגות (outOfRangeOnly).`,
+    input: listTestResultValuesInput,
+
+    async run(input) {
+      const parsed = input as z.infer<typeof listTestResultValuesInput>;
+      const limit = parsed.limit ?? DEFAULT_VALUE_ROWS;
+      const items = listTestResultValues({ companyId, ...parsed, limit });
+
+      return {
+        items,
+        // Said out loud rather than left to be inferred from a round number: a caller
+        // reasoning about a trend needs to know it is looking at a truncated series.
+        truncated: items.length === limit,
+        lastDetailSync: lastSyncPayload(companyId, 'testResultDetails'),
+      };
+    },
+  };
+}
+
+const exportTestResultDocumentInput = z.object({
+  resultId: z.string().min(1).describe('The test_result_id from testResults.list or .values.'),
+  destinationPath: z.string().min(1).describe('Where to write the decrypted PDF.'),
+  overwrite: z.boolean().default(false).describe('Replace destinationPath if it already exists.'),
+});
+
+function testResultExportDocumentOperation(companyId: HealthFundId): Operation {
+  return {
+    name: 'testResults.exportDocument',
+    companyId,
+    resource: 'testResults',
+    capability: 'sensitive_read',
+    scope: scope(companyId, 'testResults', 'sensitive_read'),
+    title: `פענוח מסמך תוצאה מוצפן (שהורד ע"י testResults.refreshDetails) לנתיב שנבחר, כקובץ קריא רגיל. מסרב לדרוס קובץ קיים אלא אם overwrite הוא true.`,
+    input: exportTestResultDocumentInput,
+
+    async run(input) {
+      const { resultId, destinationPath, overwrite } = input as z.infer<
+        typeof exportTestResultDocumentInput
+      >;
+
+      const result = findTestResultForExport(companyId, resultId);
+      if (!result || !result.document_path || !result.document_sha256) {
+        throw new Error(
+          `No stored document for ${resultId}. Run testResults.refreshDetails first, or check ` +
+            'testResults.list for document_available.',
+        );
+      }
+
+      exportDocument(result.document_path, result.document_sha256, destinationPath, { overwrite });
+      return { exported: true, destinationPath };
     },
   };
 }
@@ -324,7 +469,10 @@ export function operationsFor(companyId: HealthFundId): Operation[] {
     appointmentsListOperation(companyId),
     appointmentsRefreshOperation(companyId),
     testResultsListOperation(companyId),
+    testResultValuesOperation(companyId),
     testResultsRefreshOperation(companyId),
+    testResultsRefreshDetailsOperation(companyId),
+    testResultExportDocumentOperation(companyId),
     vaccinationsListOperation(companyId),
     vaccinationsRefreshOperation(companyId),
     form17ListOperation(companyId),

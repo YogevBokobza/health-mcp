@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -78,20 +78,80 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS idx_appointments_start ON appointments (start)`,
 
+  /**
+   * One entry on the fund's test-results timeline: a laboratory batch, an imaging
+   * report, or an imaging study.
+   *
+   * `kind` decides what else there is to read. A `lab` row's measured values are in
+   * test_result_values; a `document` row's file is at document_path (encrypted — see
+   * src/store/documents.ts, decrypted only on export). `detailed_at` is how "we have
+   * not fetched this one's detail yet" is distinguished from "we did, and there was
+   * nothing" — the two are otherwise identical and lead to very different next actions.
+   */
   `CREATE TABLE IF NOT EXISTS test_results (
-     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-     company_id      TEXT NOT NULL,
-     test_result_id  TEXT NOT NULL,
-     test_name       TEXT NOT NULL,
-     performed_on    TEXT,
-     ordering_doctor TEXT,
-     raw              TEXT,
-     first_seen_at    TEXT NOT NULL,
-     updated_at       TEXT NOT NULL,
+     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+     company_id         TEXT NOT NULL,
+     test_result_id     TEXT NOT NULL,
+     test_name          TEXT NOT NULL,
+     performed_on       TEXT,
+     resulted_on        TEXT,
+     ordering_doctor    TEXT,
+     category           TEXT,
+     kind               TEXT,
+     is_partial         INTEGER NOT NULL DEFAULT 0,
+     institute          TEXT,
+     document_available INTEGER NOT NULL DEFAULT 0,
+     document_path      TEXT,
+     document_bytes     INTEGER,
+     document_sha256    TEXT,
+     detailed_at        TEXT,
+     raw                TEXT,
+     first_seen_at      TEXT NOT NULL,
+     updated_at         TEXT NOT NULL,
      UNIQUE (company_id, test_result_id)
    )`,
 
   `CREATE INDEX IF NOT EXISTS idx_test_results_performed_on ON test_results (performed_on)`,
+
+  /**
+   * One measured analyte inside a laboratory result — the actual numbers.
+   *
+   * Flat and one row per measurement, rather than a JSON blob on test_results, because
+   * the questions this table exists to answer are per-analyte across time ("has
+   * ferritin been trending down", "what has ever been out of range") and those are a
+   * filter and sort on a real column, not a JSON walk. Deliberately excluded from
+   * `READABLE_TABLES` (see FORBIDDEN_TABLES below): the sensitive-scoped `values`
+   * operation is the only path to this data, so a plain `local:database:read` grant
+   * cannot bypass what the member gated behind `sensitive_read`.
+   *
+   * Keyed by (result, code, name): a fund's analyte code is the stable identity, but it
+   * is not always given, and the same batch can report the same analyte from two
+   * different samples (blood and urine glucose), which the name distinguishes.
+   */
+  `CREATE TABLE IF NOT EXISTS test_result_values (
+     id             INTEGER PRIMARY KEY AUTOINCREMENT,
+     company_id     TEXT NOT NULL,
+     test_result_id TEXT NOT NULL,
+     code           TEXT,
+     name           TEXT NOT NULL,
+     group_name     TEXT,
+     value          REAL,
+     text           TEXT,
+     unit           TEXT,
+     reference_min  REAL,
+     reference_max  REAL,
+     status         TEXT NOT NULL,
+     measured_on    TEXT,
+     raw            TEXT,
+     first_seen_at  TEXT NOT NULL,
+     updated_at     TEXT NOT NULL,
+     UNIQUE (company_id, test_result_id, code, name)
+   )`,
+
+  // Both indexes serve the trend query: filter by analyte, order by date.
+  `CREATE INDEX IF NOT EXISTS idx_test_result_values_name ON test_result_values (name)`,
+  `CREATE INDEX IF NOT EXISTS idx_test_result_values_measured_on ON test_result_values (measured_on)`,
+  `CREATE INDEX IF NOT EXISTS idx_test_result_values_status ON test_result_values (status)`,
 
   `CREATE TABLE IF NOT EXISTS vaccinations (
      id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,7 +254,12 @@ export const READABLE_TABLES = [
  * handles a credential; letting it SELECT the credentials table would hand back
  * exactly what the design withholds.
  */
-export const FORBIDDEN_TABLES = ['credentials', 'schema_version', 'otp_challenges'] as const;
+export const FORBIDDEN_TABLES = [
+  'credentials',
+  'schema_version',
+  'otp_challenges',
+  'test_result_values',
+] as const;
 
 export function migrate(db: Database): void {
   db.exec('BEGIN');
@@ -205,9 +270,35 @@ export function migrate(db: Database): void {
     addColumnIfMissing(db, 'vaccinations', 'age_at_administration', 'REAL');
     addColumnIfMissing(db, 'medications', 'is_standing', 'INTEGER');
 
+    for (const [column, definition] of [
+      ['resulted_on', 'TEXT'],
+      ['category', 'TEXT'],
+      ['kind', 'TEXT'],
+      ['is_partial', 'INTEGER NOT NULL DEFAULT 0'],
+      ['institute', 'TEXT'],
+      ['document_available', 'INTEGER NOT NULL DEFAULT 0'],
+      ['document_path', 'TEXT'],
+      ['document_bytes', 'INTEGER'],
+      ['document_sha256', 'TEXT'],
+      ['detailed_at', 'TEXT'],
+    ] as const) {
+      addColumnIfMissing(db, 'test_results', column, definition);
+    }
+
     const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as
       | { version: number }
       | undefined;
+
+    // v9 changed what identifies a test result: it is now the fund's own type::request_id
+    // for the result, not a hash of its name, date and doctor — which two batches drawn
+    // on the same day for the same doctor shared, silently collapsing into one row. Rows
+    // written under the old scheme cannot be matched to the new one, so they are cleared
+    // rather than left to sit alongside their own duplicates. Nothing is lost: the whole
+    // timeline rebuilds in one request on the next refresh.
+    if (row && row.version < 9) {
+      db.exec('DELETE FROM test_result_values');
+      db.exec('DELETE FROM test_results');
+    }
 
     if (!row) {
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
