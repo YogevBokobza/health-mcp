@@ -13,7 +13,7 @@ Nothing is sent anywhere. There is no server, no account, no telemetry.
 
 **Status:** early. Maccabi medications, appointments, test results, vaccinations, and
 Form 17 (טופס 17) commitment-request status work end to end (scrapers calibrated
-against a live account, library pinned at v0.2.0). Other funds are declared in the
+against a live account, library pinned at v0.3.0). Other funds are declared in the
 library but not implemented yet.
 
 ## Why not just give the agent a browser

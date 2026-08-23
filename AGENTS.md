@@ -11,7 +11,7 @@ Nothing is sent anywhere — no server, no account, no telemetry.
 
 **Status:** early. Maccabi medications, appointments, test results, vaccinations, and
 Form 17 (טופס 17) commitment-request status work end to end (scrapers calibrated
-against a live account, library pinned at v0.2.0). Other funds are declared in the
+against a live account, library pinned at v0.3.0). Other funds are declared in the
 library but not implemented yet. Next Maccabi resources to add, in order, with the
 reasoning behind the order: `docs/roadmap.md`.
 
