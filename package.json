@@ -1,6 +1,6 @@
 {
   "name": "health-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first MCP server for Israeli health fund accounts. Encrypted local storage, scoped permissions, no data leaves your machine.",
   "license": "MIT",
   "type": "module",
