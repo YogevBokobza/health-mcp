@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.2.1] - 2026-08-23
 
 ### Fixed
 - Fixed OTP login challenges being indistinguishable from a real timeout when
@@ -28,4 +28,5 @@ All notable changes to this project will be documented in this file.
 - Fixed Maccabi SMS authentication stalling on the "how do you want to verify" screen
   with "The login did not resolve to a known outcome" (israeli-health-scrapers v0.2.1).
 
+[0.2.1]: https://github.com/YogevBokobza/health-mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/YogevBokobza/health-mcp/compare/v0.1.0...v0.2.0
