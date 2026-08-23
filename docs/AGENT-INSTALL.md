@@ -247,6 +247,12 @@ alone — credentials and SMS codes belong to the human. Walk through this with 
      sent. Ask the user for the code (wording section), then call `auth_complete` with
      `{"challengeId": "...", "code": "..."}`. A long-term token is stored encrypted, so
      later refreshes need no SMS until the session expires.
+     **This requires the MCP server to stay one long-lived process for the whole
+     `auth_start` → `auth_complete` round trip** — the open browser tied to the
+     challenge cannot survive a restart. Most clients guarantee this; if `auth_complete`
+     reports the server process restarted mid-login, that is a distinct message from a
+     real timeout — call `auth_start` again rather than retrying the same code (each
+     `auth_start` also sends a real SMS, so don't loop on retries automatically).
 6. **First refresh** (optional but a good end-to-end check): call `medications_refresh`
    from the client, or
    `HEALTH_MCP_KEY=<key> node <install>/dist/cli/index.js fetch`.
