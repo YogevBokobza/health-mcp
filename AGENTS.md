@@ -65,6 +65,19 @@ than one "sync everything" call, because different collections cost very differe
 for clinic/instructions, not just one list load) and a caller should be able to ask for
 the cheap one without paying for the expensive one.
 
+**testResults splits freshness into two tiers, one per cost** (`src/operations.ts`,
+`src/sync/fetch.ts`). `testResults.refresh` stays one request for the whole timeline;
+`testResults.refreshDetails` is one request *per timeline entry* — every measured lab
+value and every result document — so it, `testResults.values` (the flat measurement
+rows), and `testResults.exportDocument` sit behind `sensitive_read` while the timeline
+pair stays behind plain `read`: seeing what a test *measured* is one decision more
+private than seeing that it happened. Each tier records its own sync-run resource
+(`testResults` vs `testResultDetails`), so "is the timeline stale" and "are the values
+stale" stay separately answerable — the listing carries both timestamps. Upserts split
+by direction, which makes detail data survive by construction rather than by caller
+care: a detail fetch updates only detail fields, a plain timeline refresh only
+list-level fields, so a cheap refresh run after an expensive one erases nothing.
+
 **`src/mcp/server.ts`** is a thin MCP transport shell: it lists tools via
 `buildToolDescriptors` (`src/mcp/tools.ts`, which turns each visible `Operation` into an
 MCP tool name/schema — unqualified while one fund is configured, fund-prefixed once more
@@ -119,6 +132,29 @@ a quoted literal doesn't false-positive, and one hidden *outside* a literal can'
 either), a hard row cap and time budget so an agent notices an accidental cross join
 rather than hanging the server on it.
 
+**The encrypted document store is the one thing holding secrets outside the database**
+(`src/store/documents.ts`). Result documents — imaging reports, interpretations, any PDF
+the fund hands back — are too bulky for rows and too sensitive for plaintext: they are
+written under `documents/<fund>/` in the app data directory as AES-256-GCM files, keyed
+from `HEALTH_MCP_KEY` via a *distinct* HKDF label than the database key, so a document
+key and the database key can never be confused for each other. Filenames are the
+result's own id — no dates, no test names — so listing the directory leaks nothing about
+what the member was tested for. A checksum recorded at write time is verified on every
+read, and decryption happens only on explicit export (`testResults.exportDocument`) to a
+path the caller chooses, refusing to overwrite without a flag. This diverges from the
+reference implementation posted on #13 (plaintext PDFs, readable names): the
+encrypted-at-rest story this project is built on wins.
+
+**Schema v9 changed test-result identity, and cleared old rows doing it**
+(`src/db/schema.ts`). A result's id is now the fund's own `type::request_id` — what the
+library's timeline API returns — rather than a hash of name/date/doctor; the hash
+collapsed two same-day batches from the same referrer into one row, silently losing
+data. Pre-v9 rows carry no id convertible to the new scheme, so the migration clears
+them rather than leaving rows that can never be matched by a future upsert. Clearing is
+safe on both ends: the timeline rebuilds in a single request via `testResults.refresh`,
+and no detail data can be lost with them, because the detail tier arrived in the same
+v9 — a pre-v9 row by definition has no values or documents attached.
+
 **Sync-run history is shared across resources, not resource-specific**
 (`src/db/sync-runs.ts`): `startSyncRun`/`finishSyncRun`/`lastSyncRun` take a `resource`
 argument and every fetch attempt — successful or not — gets a row, because "is this
@@ -138,16 +174,20 @@ accordingly, never uploaded anywhere.
 **Where things live** (`src/config/paths.ts`): OS-conventional app data directory
 (`~/Library/Application Support/HealthMCP`, `~/.local/share/HealthMCP`,
 `%APPDATA%/HealthMCP`), overridable with `HEALTH_MCP_DATA_DIR`. Holds `database.db`,
-`policy.json`, `audit.jsonl`, and `scraper/` (the library's sessions + diagnostics).
+`policy.json`, `audit.jsonl`, `documents/` (encrypted test-result documents), and
+`scraper/` (the library's sessions + diagnostics).
 
 ## Tests
 
 `test/db/store.test.ts` opens a real (temp, disposable) encrypted database and exercises
-credentials, medications, and sync-run storage together — including an explicit
-assertion that the raw database file never contains a stored password or ID in
-plaintext. `test/db/query.test.ts` covers `assertSafeSelect`'s adversarial cases
-(literal-hidden keywords, multi-statement injection, forbidden tables). No test needs a
-real fund account or network access.
+credentials, medications, test results (including the detail tier: values round-trip and
+survive a plain refresh, the identity migration clears old rows), and sync-run storage
+together — including an explicit assertion that the raw database file never contains a
+stored password or ID in plaintext. `test/db/query.test.ts` covers `assertSafeSelect`'s
+adversarial cases (literal-hidden keywords, multi-statement injection, forbidden
+tables); `test/store/documents.test.ts` covers the encrypted document store (round
+trip, wrong key, checksum mismatch). No test needs a real fund account or network
+access.
 
 ## PII
 
