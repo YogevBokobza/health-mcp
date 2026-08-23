@@ -307,7 +307,9 @@ async function fetchTestResultDetails(args: string[]): Promise<void> {
   });
 
   outcome.success
-    ? stdout.write(`${outcome.companyId}: ${outcome.recordCount} lab values stored\n`)
+    ? stdout.write(
+        `${outcome.companyId}: ${outcome.recordCount} lab values, ${outcome.documentCount ?? 0} documents stored\n`,
+      )
     : printOutcome(outcome);
   if (!outcome.success) process.exitCode = 1;
 }

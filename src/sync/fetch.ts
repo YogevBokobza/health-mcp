@@ -20,6 +20,12 @@ export interface FetchOutcome {
   companyId: HealthFundId;
   success: boolean;
   recordCount: number;
+  /**
+   * Set only by a fetch that collects two different kinds of record in one run
+   * (testResultDetails: lab values vs. result documents) — `recordCount` alone would
+   * otherwise read as "nothing happened" for a document-only result with no values.
+   */
+  documentCount?: number;
   errorType?: string;
   errorMessage?: string;
   /** Failure classification; present only when `success` is false. */
@@ -27,6 +33,9 @@ export interface FetchOutcome {
   /** What an agent should do next about the failure; null when there is no advice. */
   next?: string | null;
 }
+
+/** What a `runFetch` store step reports back: how many of each kind of record it wrote. */
+type StoreResult = number | { recordCount: number; documentCount?: number };
 
 /** What went wrong at the auth layer, in the vocabulary an agent can act on. */
 export type FetchFailureStatus = 'session_expired' | 'credentials_rejected' | 'fetch_failed';
@@ -94,7 +103,7 @@ async function runFetch(
   companyId: HealthFundId,
   resource: SyncResource,
   fetchTargets: FetchTarget[],
-  store: (companyId: HealthFundId, accounts: HealthAccount[]) => number,
+  store: (companyId: HealthFundId, accounts: HealthAccount[]) => StoreResult,
   options: Partial<ScraperOptions>,
 ): Promise<FetchOutcome> {
   const credentials = requireCredentials(companyId);
@@ -137,11 +146,18 @@ async function runFetch(
       };
     }
 
-    const recordCount = store(companyId, result.accounts ?? []);
+    const stored = store(companyId, result.accounts ?? []);
+    const recordCount = typeof stored === 'number' ? stored : stored.recordCount;
+    const documentCount = typeof stored === 'number' ? undefined : stored.documentCount;
 
     finishSyncRun(runId, { success: true, recordCount });
 
-    return { companyId, success: true, recordCount };
+    return {
+      companyId,
+      success: true,
+      recordCount,
+      ...(documentCount !== undefined ? { documentCount } : {}),
+    };
   } catch (error) {
     finishSyncRun(runId, {
       success: false,
@@ -221,7 +237,10 @@ export async function fetchTestResultDetailsForFund(
     companyId,
     'testResultDetails',
     ['testResultDetails'],
-    (id, accounts) => storeTestResultDetails(id, accounts.flatMap((account) => account.testResults ?? [])),
+    (id, accounts) => {
+      const counts = storeTestResultDetails(id, accounts.flatMap((account) => account.testResults ?? []));
+      return { recordCount: counts.values, documentCount: counts.documents };
+    },
     { ...scraperOptions, ...(since ? { testResultDetailsSince: since } : {}) },
   );
 }

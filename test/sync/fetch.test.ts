@@ -370,7 +370,7 @@ describe('fetchTestResultDetailsForFund', () => {
     expect(scraperFactory).toHaveBeenCalledWith(
       expect.objectContaining({ fetch: ['testResultDetails'] }),
     );
-    expect(outcome).toMatchObject({ success: true, recordCount: 1 });
+    expect(outcome).toMatchObject({ success: true, recordCount: 1, documentCount: 0 });
     expect(listTestResultValues({ companyId: HealthFundTypes.maccabi })).toEqual([
       expect.objectContaining({ name: 'גלוקוז סנכרון בדיוני', value: 90 }),
     ]);
@@ -381,6 +381,27 @@ describe('fetchTestResultDetailsForFund', () => {
     });
     // The cheap timeline resource's own history is untouched by the detail fetch.
     expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')).toBeNull();
+  });
+
+  it('counts documents separately from values, so a document-only result is not reported as empty', async () => {
+    const documentEntry: TestResult = {
+      ...fictionalResult,
+      id: 'fictional-sync-detail-document',
+      kind: 'document',
+      documentAvailable: true,
+      document: {
+        fileName: 'fictional-sync-report.pdf',
+        contentType: 'application/pdf',
+        byteLength: 4,
+        content: Buffer.from('fict').toString('base64'),
+      },
+    };
+    scraperFactory.mockReturnValue(successfulScraper([{ testResults: [documentEntry] }]));
+
+    const outcome = await fetchTestResultDetailsForFund(HealthFundTypes.maccabi);
+
+    // Zero lab values, one document — recordCount alone would read as "nothing found".
+    expect(outcome).toMatchObject({ success: true, recordCount: 0, documentCount: 1 });
   });
 
   it('passes since as testResultDetailsSince, not as a raw scraper option', async () => {

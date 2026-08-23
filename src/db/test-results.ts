@@ -156,7 +156,15 @@ function valueParams(
  * means "not fetched", which is not the same as "fetched and empty" and must not delete
  * anything.
  */
-export function storeTestResultDetails(companyId: HealthFundId, testResults: TestResult[]): number {
+export interface StoreTestResultDetailsCounts {
+  values: number;
+  documents: number;
+}
+
+export function storeTestResultDetails(
+  companyId: HealthFundId,
+  testResults: TestResult[],
+): StoreTestResultDetailsCounts {
   const db = openDatabase();
   const now = new Date().toISOString();
 
@@ -203,7 +211,8 @@ export function storeTestResultDetails(companyId: HealthFundId, testResults: Tes
       WHERE company_id = @companyId AND test_result_id = @testResultId`,
   );
 
-  let written = 0;
+  let valuesWritten = 0;
+  let documentsWritten = 0;
 
   const writeAll = db.transaction((items: TestResult[]) => {
     for (const testResult of items) {
@@ -228,7 +237,7 @@ export function storeTestResultDetails(companyId: HealthFundId, testResults: Tes
 
         for (const value of testResult.values ?? []) {
           insertValue.run(valueParams(companyId, testResult.id, value, previouslySeen, now));
-          written += 1;
+          valuesWritten += 1;
         }
       }
 
@@ -242,6 +251,7 @@ export function storeTestResultDetails(companyId: HealthFundId, testResults: Tes
           sha256: saved.sha256,
           now,
         });
+        documentsWritten += 1;
       } else {
         markDetailedWithoutDocument.run({ companyId, testResultId: testResult.id, now });
       }
@@ -250,7 +260,7 @@ export function storeTestResultDetails(companyId: HealthFundId, testResults: Tes
 
   writeAll(testResults);
 
-  return written;
+  return { values: valuesWritten, documents: documentsWritten };
 }
 
 export function listTestResults(

@@ -476,15 +476,31 @@ describe('test result details (values and documents)', () => {
   });
 
   it('stores measured values and reports how many are behind each result', () => {
-    storeTestResultDetails(HealthFundTypes.maccabi, [
+    const counts = storeTestResultDetails(HealthFundTypes.maccabi, [
       testResult({ id: 'fictional-detail-1', kind: 'lab', values: [testResultValue()] }),
     ]);
+
+    expect(counts).toEqual({ values: 1, documents: 0 });
 
     const values = listTestResultValues({ companyId: HealthFundTypes.maccabi });
     expect(values).toContainEqual(
       expect.objectContaining({ name: fictionalAnalyteName, value: 90, status: 'within' }),
     );
     expect(countTestResultValues({ companyId: HealthFundTypes.maccabi }).get('fictional-detail-1')).toBe(1);
+  });
+
+  it('counts values and documents separately, so a document-only result is not reported as empty', () => {
+    const counts = storeTestResultDetails(HealthFundTypes.maccabi, [
+      testResult({ id: 'fictional-detail-values-and-doc', kind: 'lab', values: [testResultValue(), testResultValue({ code: 'FICT-2', name: 'אשלגן בדיוני' })] }),
+      testResult({
+        id: 'fictional-detail-doc-only',
+        kind: 'document',
+        documentAvailable: true,
+        document: fictionalDocument(),
+      }),
+    ]);
+
+    expect(counts).toEqual({ values: 2, documents: 1 });
   });
 
   it('filters values by analyte name, date range, and out-of-range-only', () => {
