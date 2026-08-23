@@ -93,7 +93,7 @@ function medicationsListOperation(companyId: HealthFundId): Operation {
     resource: 'medications',
     capability: 'read',
     scope: scope(companyId, 'medications', 'read'),
-    title: `רשימת התרופות הקבועות ב${SCRAPERS[companyId].name} מהאחסון המקומי, כולל תוקף המרשם וכמה ימים נותרו. לא ניגש לאתר — הרץ medications.refresh כדי לעדכן.`,
+    title: `רשימת כל התרופות שיש להן מרשם תקף ב${SCRAPERS[companyId].name} מהאחסון המקומי, עם סימון אילו מהן תרופות קבועות (העמודה is_standing: 1 = תרופה קבועה, 0 = חד-פעמית), כולל תוקף המרשם וכמה ימים נותרו. לא ניגש לאתר — הרץ medications.refresh כדי לעדכן.`,
     input: listMedicationsInput,
 
     async run(input) {
@@ -113,7 +113,7 @@ function medicationsRefreshOperation(companyId: HealthFundId): Operation {
     resource: 'medications',
     capability: 'read',
     scope: scope(companyId, 'medications', 'read'),
-    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת התרופות באחסון המקומי.`,
+    title: `התחברות ל${SCRAPERS[companyId].name} ורענון רשימת כל התרופות שיש להן מרשם תקף (קבועות וחד-פעמיות) באחסון המקומי.`,
     input: z.object({}).default({}),
 
     async run() {

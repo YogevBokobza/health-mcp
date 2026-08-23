@@ -14,6 +14,8 @@ export interface StoredMedication {
   refills_remaining: number | null;
   days_until_expiry: number | null;
   status: string;
+  /** 1 for a standing prescription (תרופה קבועה), 0 for a one-off, null if unknown. */
+  is_standing: number | null;
   first_seen_at: string;
   updated_at: string;
 }
@@ -39,6 +41,8 @@ function medicationParams(
     refillsRemaining: medication.refillsRemaining,
     daysUntilExpiry: medication.daysUntilExpiry,
     status: medication.status,
+    // better-sqlite3 will not bind a JS boolean; store it as 0/1.
+    isStanding: medication.isStanding ? 1 : 0,
     raw: medication.raw ? JSON.stringify(medication.raw) : null,
     firstSeenAt,
     now,
@@ -47,10 +51,10 @@ function medicationParams(
 
 const INSERT_MEDICATION = `INSERT INTO medications (
    company_id, name, dosage, form, prescribed_by, last_dispensed, valid_until,
-   refills_remaining, days_until_expiry, status, raw, first_seen_at, updated_at
+   refills_remaining, days_until_expiry, status, is_standing, raw, first_seen_at, updated_at
  ) VALUES (
    @companyId, @name, @dosage, @form, @prescribedBy, @lastDispensed, @validUntil,
-   @refillsRemaining, @daysUntilExpiry, @status, @raw, @firstSeenAt, @now
+   @refillsRemaining, @daysUntilExpiry, @status, @isStanding, @raw, @firstSeenAt, @now
  )`;
 
 /**
@@ -71,6 +75,7 @@ export function upsertMedications(companyId: HealthFundId, medications: Medicati
        refills_remaining = @refillsRemaining,
        days_until_expiry = @daysUntilExpiry,
        status            = @status,
+       is_standing       = @isStanding,
        raw               = @raw,
        updated_at        = @now`,
   );

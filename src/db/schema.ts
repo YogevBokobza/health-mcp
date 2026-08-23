@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -27,7 +27,9 @@ const STATEMENTS = [
    )`,
 
   /**
-   * Standing prescriptions.
+   * Valid prescriptions — both standing (תרופה קבועה) and one-off. `is_standing`
+   * flags which is which, so a caller can filter to standing prescriptions itself
+   * rather than the others being dropped before they ever reach the table.
    *
    * Keyed by (company_id, name, valid_until) so re-running a fetch updates a
    * prescription in place instead of accumulating a new copy every time — the table
@@ -45,6 +47,7 @@ const STATEMENTS = [
      refills_remaining INTEGER,
      days_until_expiry INTEGER,
      status            TEXT NOT NULL,
+     is_standing       INTEGER,
      raw               TEXT,
      first_seen_at     TEXT NOT NULL,
      updated_at        TEXT NOT NULL,
@@ -200,6 +203,7 @@ export function migrate(db: Database): void {
 
     addColumnIfMissing(db, 'sync_runs', 'resource', "TEXT NOT NULL DEFAULT 'medications'");
     addColumnIfMissing(db, 'vaccinations', 'age_at_administration', 'REAL');
+    addColumnIfMissing(db, 'medications', 'is_standing', 'INTEGER');
 
     const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as
       | { version: number }

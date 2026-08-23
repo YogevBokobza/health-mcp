@@ -43,6 +43,7 @@ function medication(overrides: Partial<Medication> = {}): Medication {
     refillsRemaining: 2,
     daysUntilExpiry: 17,
     status: 'expiring_soon',
+    isStanding: true,
     provider: HealthFundTypes.maccabi,
     ...overrides,
   };
@@ -160,6 +161,26 @@ describe('medications', () => {
     const before = listMedications()[0]!.first_seen_at;
     upsertMedications(HealthFundTypes.maccabi, [medication({ status: 'active' })]);
     expect(listMedications()[0]?.first_seen_at).toBe(before);
+  });
+
+  it('stores the standing flag as 0/1 for both standing and one-off prescriptions', () => {
+    upsertMedications(HealthFundTypes.maccabi, [
+      medication({ name: 'תרופה קבועה בדיונית', isStanding: true }),
+      medication({ name: 'תרופה חד-פעמית בדיונית', validUntil: '2026-09-30', isStanding: false }),
+    ]);
+
+    const byName = new Map(listMedications().map((row) => [row.name, row.is_standing]));
+    expect(byName.get('תרופה קבועה בדיונית')).toBe(1);
+    expect(byName.get('תרופה חד-פעמית בדיונית')).toBe(0);
+  });
+
+  it('updates the standing flag in place when a prescription changes category', () => {
+    upsertMedications(HealthFundTypes.maccabi, [medication({ isStanding: false })]);
+    upsertMedications(HealthFundTypes.maccabi, [medication({ isStanding: true })]);
+
+    const rows = listMedications({ companyId: HealthFundTypes.maccabi });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.is_standing).toBe(1);
   });
 
   it('treats a different validity period as a different prescription', () => {

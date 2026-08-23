@@ -175,7 +175,13 @@ function medications(args: string[]): void {
           ? `פג לפני ${Math.abs(row.days_until_expiry)} ימים`
           : `${row.days_until_expiry} ימים לתפוגה`;
 
-    stdout.write(`${row.name.padEnd(28)} ${(row.valid_until ?? '—').padEnd(12)} ${expiry}\n`);
+    // Both standing (תרופה קבועה) and one-off valid prescriptions are stored now, so
+    // mark which is which rather than letting them look identical.
+    const kind = row.is_standing === null ? '' : row.is_standing ? 'קבועה' : 'חד-פעמית';
+
+    stdout.write(
+      `${row.name.padEnd(28)} ${(row.valid_until ?? '—').padEnd(12)} ${kind.padEnd(9)} ${expiry}\n`,
+    );
   }
 }
 
