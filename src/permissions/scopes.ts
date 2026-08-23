@@ -13,7 +13,17 @@ import type { HealthFundId } from 'israeli-health-scrapers';
  */
 export type Scope = `${string}:${string}:${string}`;
 
-export type Capability = 'read' | 'write';
+/**
+ * What a grant lets an operation do.
+ *
+ * `sensitive_read` exists because some data inside a resource is one decision more
+ * private than the rest of it — the measured values behind a test-results timeline,
+ * say, beside the timeline's metadata. A member may want an agent to see the timeline
+ * without seeing what it measured. A `sensitive_read` grant includes everything a
+ * `read` grant covers for the same fund and resource; the lattice is one-way, so a
+ * plain `read` grant never reaches a `sensitive_read` operation.
+ */
+export type Capability = 'read' | 'sensitive_read' | 'write';
 
 export type Resource =
   | 'medications'
@@ -59,5 +69,26 @@ export function anyScopeMatches(patterns: readonly string[], granted: Scope): bo
 /** Reads the capability segment back out of a scope. */
 export function capabilityOf(s: Scope): Capability | null {
   const last = s.split(':')[2];
-  return last === 'read' || last === 'write' ? last : null;
+  return last === 'read' || last === 'sensitive_read' || last === 'write' ? last : null;
+}
+
+/**
+ * The concrete scopes whose grant would satisfy `required`: itself, plus — for a
+ * `read` scope — the same scope with the capability upgraded to `sensitive_read`,
+ * because a sensitive-read grant includes read. Enumerating variants keeps wildcard
+ * semantics in one place: `scopeMatches` stays pattern-vs-concrete, and implication
+ * is applied before it, never inside it. The upgrade direction is the only one, so
+ * `*:*:read` cannot reach a `sensitive_read` operation while `maccabi:testResults:*`
+ * still can.
+ */
+function scopeVariantsSatisfying(required: Scope): Scope[] {
+  const [fund, resource, capability] = required.split(':');
+  return capability === 'read'
+    ? [required, `${fund}:${resource}:sensitive_read` as Scope]
+    : [required];
+}
+
+/** True when any granted pattern covers the required scope, honouring capability implication. */
+export function grantsScope(patterns: readonly string[], required: Scope): boolean {
+  return scopeVariantsSatisfying(required).some((variant) => anyScopeMatches(patterns, variant));
 }
