@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Fixed OTP login challenges being indistinguishable from a real timeout when
+  `auth_complete` lands on an MCP server process other than the one `auth_start` ran
+  on (schema v7, `otp_challenges` table). The live `Scraper`/browser still cannot
+  survive a process restart — that login still has to be redone — but the failure now
+  reports distinctly as "server restarted mid-login" instead of a generic "unknown or
+  expired", and `docs/AGENT-INSTALL.md` now calls out the one-long-lived-process
+  assumption. (#19)
+
 ## [0.2.0] - 2026-08-23
 
 ### Added

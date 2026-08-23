@@ -212,15 +212,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === AUTH_COMPLETE_TOOL) {
       const { challengeId, code } = args as { challengeId: string; code: string };
-      const challenge = takeChallenge(challengeId);
+      const outcome = takeChallenge(challengeId);
 
-      if (!challenge) {
+      if (outcome.status === 'unknown') {
         return errorPayload({
           status: 'error',
-          message: 'That login challenge is unknown or expired. Start a new login.',
+          message: 'That login challenge is unknown. Start a new login.',
         });
       }
 
+      if (outcome.status === 'expired') {
+        return errorPayload({
+          status: 'error',
+          message: 'That login challenge has expired. Start a new login.',
+        });
+      }
+
+      if (outcome.status === 'lostToRestart') {
+        // A real challenge, still within its TTL, but its browser lived in a process
+        // that is no longer this one — not a timeout, and not recoverable, since the
+        // live Scraper cannot be persisted across a restart.
+        return errorPayload({
+          status: 'error',
+          message:
+            'The MCP server process restarted before this login could be completed, so its browser session was lost. This is not a timeout — start a new login.',
+        });
+      }
+
+      const { challenge } = outcome;
       try {
         const result = await challenge.scraper.getLongTermTwoFactorToken?.(code);
         if (!result?.success) {

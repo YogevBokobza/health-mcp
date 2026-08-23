@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3-multiple-ciphers';
  * are the contract: they are named for what a person would ask about, not for how the
  * scraper happens to return things.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -134,6 +134,21 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS idx_form17_requests_submitted_on ON form17_requests (submitted_on)`,
 
+  /**
+   * Pending OTP login challenges — metadata only, never the live `Scraper`/browser,
+   * which cannot survive a process restart regardless. Persisting this much lets an
+   * `auth_complete` that lands on a different process than the one that ran
+   * `auth_start` (some MCP clients don't guarantee one long-lived process) be told
+   * apart from a genuinely expired or bogus challenge id, instead of both reporting
+   * an identical "unknown or expired".
+   */
+  `CREATE TABLE IF NOT EXISTS otp_challenges (
+     challenge_id TEXT PRIMARY KEY,
+     company_id   TEXT NOT NULL,
+     created_at   TEXT NOT NULL,
+     expires_at   TEXT NOT NULL
+   )`,
+
   /** One row per fetch attempt, successful or not — one history per fund per resource. */
   `CREATE TABLE IF NOT EXISTS sync_runs (
      id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,7 +191,7 @@ export const READABLE_TABLES = [
  * handles a credential; letting it SELECT the credentials table would hand back
  * exactly what the design withholds.
  */
-export const FORBIDDEN_TABLES = ['credentials', 'schema_version'] as const;
+export const FORBIDDEN_TABLES = ['credentials', 'schema_version', 'otp_challenges'] as const;
 
 export function migrate(db: Database): void {
   db.exec('BEGIN');
