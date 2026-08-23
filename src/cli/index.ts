@@ -15,17 +15,24 @@ import {
   saveCredentials,
 } from '../db/credentials.js';
 import { listMedications } from '../db/medications.js';
-import { listTestResults } from '../db/test-results.js';
+import {
+  countTestResultValues,
+  findTestResultForExport,
+  listTestResultValues,
+  listTestResults,
+} from '../db/test-results.js';
 import { listVaccinations } from '../db/vaccinations.js';
 import { listForm17Requests } from '../db/form17.js';
 import { lastSyncRun } from '../db/sync-runs.js';
 import {
   fetchFunds,
   fetchForm17ForFund,
+  fetchTestResultDetailsForFund,
   fetchTestResultsForFund,
   fetchVaccinationsForFund,
   type FetchOutcome,
 } from '../sync/fetch.js';
+import { exportDocument } from '../store/documents.js';
 import { writeClaudeConfig } from './configure-claude.js';
 
 // require, not an import assertion: works identically from source (tsx) and from the
@@ -45,6 +52,48 @@ const credentialsFileSchema = z.array(
   }),
 );
 
+/**
+ * Options that take a value, so `--test creatinine` is not read as the fund
+ * "creatinine".
+ *
+ * Listing them is what lets a positional argument be recognized by position: without
+ * it, "the first argument that is not a flag" would pick up whatever followed one.
+ */
+const VALUE_OPTIONS = ['--since', '--test'] as const;
+
+interface ParsedArgs {
+  /** Arguments that are neither an option nor an option's value. */
+  positional: string[];
+  option: (name: (typeof VALUE_OPTIONS)[number]) => string | undefined;
+  has: (name: string) => boolean;
+}
+
+function parseArgs(args: string[]): ParsedArgs {
+  const positional: string[] = [];
+  const options = new Map<string, string>();
+  const switches = new Set<string>();
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (VALUE_OPTIONS.includes(arg as (typeof VALUE_OPTIONS)[number])) {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith('-')) throw new Error(`${arg} needs a value.`);
+      options.set(arg, value);
+      i += 1;
+    } else if (arg.startsWith('-')) {
+      switches.add(arg);
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  return {
+    positional,
+    option: (name) => options.get(name),
+    has: (name) => switches.has(name),
+  };
+}
+
 function usage(): void {
   stdout.write(`health-mcp — local-first access to your Israeli health fund account
 
@@ -54,11 +103,19 @@ Commands:
   remove-creds <fund>           Delete stored credentials for a fund
   login <fund>                  Interactive login; stores a reusable session
   fetch [fund...]               Fetch and store data (defaults to every configured fund)
-  fetch-test-results [fund]     Fetch and store test results (one fund only)
+  fetch-test-results [fund]     Fetch and store the test-results timeline (one request)
+  fetch-test-result-details [fund] [--since YYYY-MM-DD]
+                                 Fetch the results themselves: every lab value, and every
+                                 result document, encrypted to disk. Slow — one request
+                                 per test.
   fetch-vaccinations [fund]     Fetch and store vaccinations (one fund only)
   fetch-form17 [fund]           Fetch and store Form 17 requests (one fund only)
   medications [fund]            Print stored prescriptions
   test-results [fund]           Print stored test results, newest first
+  test-result-values [fund] [--test NAME] [--abnormal] [--since YYYY-MM-DD]
+                                 Print stored lab values, newest first
+  export-document <fund> <resultId> <destination> [--overwrite]
+                                 Decrypt a stored test-result document to a file
   vaccinations [fund]           Print stored vaccinations, newest first
   form17 [fund]                 Print stored Form 17 requests, newest first
   status                        Where data lives and when each fund last synced
@@ -204,11 +261,113 @@ function testResults(args: string[]): void {
     return;
   }
 
+  const valueCounts = countTestResultValues(companyId ? { companyId } : {});
+
   for (const row of rows) {
+    const values = valueCounts.get(row.test_result_id) ?? 0;
+    // What is actually behind this row: numbers, a saved (encrypted) file, a file we
+    // have not fetched yet, or — for an imaging study — nothing this tool can ever
+    // fetch, which must not read as "not fetched yet".
+    const detail = values
+      ? `${values} values`
+      : row.document_path
+        ? 'document stored'
+        : row.document_available
+          ? 'document (not fetched)'
+          : row.kind === 'imaging'
+            ? 'imaging — view on fund site only'
+            : row.detailed_at
+              ? '—'
+              : 'not fetched';
+
     stdout.write(
-      `${(row.performed_on ?? '—').padEnd(12)} ${row.test_name.padEnd(30)} ${row.ordering_doctor ?? ''}\n`,
+      `${(row.performed_on ?? '—').padEnd(12)} ${row.test_name.padEnd(30)} ` +
+        `${(row.ordering_doctor ?? '').padEnd(20)} ${detail}\n`,
     );
   }
+}
+
+async function fetchTestResultDetails(args: string[]): Promise<void> {
+  const parsed = parseArgs(args);
+  const companyId = (parsed.positional[0] ?? 'maccabi') as HealthFundId;
+  requireCredentials(companyId);
+
+  const since = parsed.option('--since');
+  if (since !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+    throw new Error('Usage: health-mcp fetch-test-result-details [fund] --since YYYY-MM-DD');
+  }
+
+  stdout.write(
+    `Fetching test results from ${SCRAPERS[companyId].name}${since ? ` since ${since}` : ''}. This takes time — one request per test.\n`,
+  );
+
+  const outcome = await fetchTestResultDetailsForFund(companyId, {
+    verbose: parsed.has('--verbose'),
+    ...(since ? { since } : {}),
+  });
+
+  outcome.success
+    ? stdout.write(`${outcome.companyId}: ${outcome.recordCount} lab values stored\n`)
+    : printOutcome(outcome);
+  if (!outcome.success) process.exitCode = 1;
+}
+
+function testResultValues(args: string[]): void {
+  const parsed = parseArgs(args);
+  const companyId = parsed.positional[0] as HealthFundId | undefined;
+  const name = parsed.option('--test');
+  const from = parsed.option('--since');
+
+  const rows = listTestResultValues({
+    ...(companyId ? { companyId } : {}),
+    ...(name ? { name } : {}),
+    ...(from ? { from } : {}),
+    outOfRangeOnly: parsed.has('--abnormal'),
+  });
+
+  if (rows.length === 0) {
+    stdout.write('No stored lab values. Run: health-mcp fetch-test-result-details\n');
+    return;
+  }
+
+  for (const row of rows) {
+    const range =
+      row.reference_min !== null || row.reference_max !== null
+        ? `[${row.reference_min ?? ''}–${row.reference_max ?? ''}]`
+        : '';
+    const flag = row.status === 'above' ? '↑' : row.status === 'below' ? '↓' : ' ';
+    const measured = row.value !== null ? String(row.value) : (row.text ?? '—');
+
+    stdout.write(
+      `${(row.measured_on ?? row.performed_on ?? '—').padEnd(12)} ${row.name.padEnd(28)} ` +
+        `${flag} ${measured.padEnd(10)} ${(row.unit ?? '').padEnd(12)} ${range}\n`,
+    );
+  }
+}
+
+function exportDocumentCommand(args: string[]): void {
+  const parsed = parseArgs(args);
+  const [companyId, resultId, destinationPath] = parsed.positional as [
+    HealthFundId | undefined,
+    string | undefined,
+    string | undefined,
+  ];
+
+  if (!companyId || !resultId || !destinationPath) {
+    throw new Error('Usage: health-mcp export-document <fund> <resultId> <destination> [--overwrite]');
+  }
+
+  const result = findTestResultForExport(companyId, resultId);
+  if (!result || !result.document_path || !result.document_sha256) {
+    throw new Error(
+      `No stored document for ${resultId}. Run: health-mcp fetch-test-result-details ${companyId}`,
+    );
+  }
+
+  exportDocument(result.document_path, result.document_sha256, destinationPath, {
+    overwrite: parsed.has('--overwrite'),
+  });
+  stdout.write(`decrypted to ${destinationPath}\n`);
 }
 
 async function fetchVaccinations(args: string[]): Promise<void> {
@@ -311,6 +470,9 @@ async function main(): Promise<void> {
     case 'fetch-test-results':
       await fetchTestResults(args);
       break;
+    case 'fetch-test-result-details':
+      await fetchTestResultDetails(args);
+      break;
     case 'fetch-vaccinations':
       await fetchVaccinations(args);
       break;
@@ -322,6 +484,12 @@ async function main(): Promise<void> {
       break;
     case 'test-results':
       testResults(args);
+      break;
+    case 'test-result-values':
+      testResultValues(args);
+      break;
+    case 'export-document':
+      exportDocumentCommand(args);
       break;
     case 'vaccinations':
       vaccinations(args);

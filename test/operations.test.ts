@@ -21,14 +21,17 @@ function policy(scopes: string[]): ResolvedPolicy {
 }
 
 describe('test-result operations', () => {
-  it('registers exactly the ten supported Maccabi resource operations', () => {
+  it('registers exactly the thirteen supported Maccabi resource operations', () => {
     expect(maccabiOperations.map((operation) => operation.name)).toEqual([
       'medications.list',
       'medications.refresh',
       'appointments.list',
       'appointments.refresh',
       'testResults.list',
+      'testResults.values',
       'testResults.refresh',
+      'testResults.refreshDetails',
+      'testResults.exportDocument',
       'vaccinations.list',
       'vaccinations.refresh',
       'form17.list',
@@ -36,12 +39,12 @@ describe('test-result operations', () => {
     ]);
   });
 
-  it('classifies test-result listing and refresh as scoped reads', () => {
+  it('classifies test-result listing and refresh as scoped plain reads', () => {
     const testResultOperations = maccabiOperations.filter(
       (operation) => operation.resource === 'testResults',
     );
 
-    expect(testResultOperations).toHaveLength(2);
+    expect(testResultOperations).toHaveLength(5);
     expect(
       testResultOperations.map(({ name, resource, capability, scope }) => ({
         name,
@@ -57,15 +60,33 @@ describe('test-result operations', () => {
         scope: 'maccabi:testResults:read',
       },
       {
+        name: 'testResults.values',
+        resource: 'testResults',
+        capability: 'sensitive_read',
+        scope: 'maccabi:testResults:sensitive_read',
+      },
+      {
         name: 'testResults.refresh',
         resource: 'testResults',
         capability: 'read',
         scope: 'maccabi:testResults:read',
       },
+      {
+        name: 'testResults.refreshDetails',
+        resource: 'testResults',
+        capability: 'sensitive_read',
+        scope: 'maccabi:testResults:sensitive_read',
+      },
+      {
+        name: 'testResults.exportDocument',
+        resource: 'testResults',
+        capability: 'sensitive_read',
+        scope: 'maccabi:testResults:sensitive_read',
+      },
     ]);
   });
 
-  it('discovers test-result operations only when their scope is granted', () => {
+  it('discovers the plain-read test-result operations under a read grant, never the sensitive ones', () => {
     const testResultGrant = new PermissionEngine(policy(['maccabi:testResults:read']));
     const medicationGrant = new PermissionEngine(policy(['maccabi:medications:read']));
 
@@ -78,6 +99,18 @@ describe('test-result operations', () => {
         .visibleOperations(maccabiOperations)
         .some((operation) => operation.resource === 'testResults'),
     ).toBe(false);
+  });
+
+  it('discovers all five test-result operations under a sensitive_read grant', () => {
+    const grant = new PermissionEngine(policy(['maccabi:testResults:sensitive_read']));
+
+    expect(grant.visibleOperations(maccabiOperations).map((operation) => operation.name)).toEqual([
+      'testResults.list',
+      'testResults.values',
+      'testResults.refresh',
+      'testResults.refreshDetails',
+      'testResults.exportDocument',
+    ]);
   });
 
   it('classifies and discovers vaccination operations as scoped reads', () => {
@@ -114,6 +147,20 @@ describe('test-result operations', () => {
     expect(toolNameFor(refresh, false)).toBe('testResults_refresh');
     expect(toolNameFor(list, true)).toBe('maccabi_testResults_list');
     expect(toolNameFor(refresh, true)).toBe('maccabi_testResults_refresh');
+  });
+
+  it('uses stable tool names for the sensitive-read test-result operations', () => {
+    const values = maccabiOperations.find((operation) => operation.name === 'testResults.values')!;
+    const refreshDetails = maccabiOperations.find(
+      (operation) => operation.name === 'testResults.refreshDetails',
+    )!;
+    const exportDocument = maccabiOperations.find(
+      (operation) => operation.name === 'testResults.exportDocument',
+    )!;
+
+    expect(toolNameFor(values, false)).toBe('testResults_values');
+    expect(toolNameFor(refreshDetails, false)).toBe('testResults_refreshDetails');
+    expect(toolNameFor(exportDocument, false)).toBe('testResults_exportDocument');
   });
 
   it('classifies and discovers form17 operations as scoped reads', () => {

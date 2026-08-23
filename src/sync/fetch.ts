@@ -10,7 +10,7 @@ import {
 import { requireCredentials } from '../db/credentials.js';
 import { replaceMedicationsSnapshot } from '../db/medications.js';
 import { upsertAppointments } from '../db/appointments.js';
-import { upsertTestResults } from '../db/test-results.js';
+import { storeTestResultDetails, upsertTestResults } from '../db/test-results.js';
 import { upsertVaccinations } from '../db/vaccinations.js';
 import { upsertForm17Requests } from '../db/form17.js';
 import { finishSyncRun, startSyncRun, type SyncResource } from '../db/sync-runs.js';
@@ -196,6 +196,33 @@ export async function fetchTestResultsForFund(
     ['testResults'],
     (id, accounts) => upsertTestResults(id, accounts.flatMap((account) => account.testResults ?? [])),
     options,
+  );
+}
+
+/**
+ * Refreshes the results themselves — every laboratory value, and every result document
+ * saved to disk (encrypted).
+ *
+ * Its own operation rather than part of fetchTestResultsForFund, for the same reason
+ * appointments is not part of fetchFund: this one costs a request per result while the
+ * timeline costs one, and a caller that just wants to know whether new results arrived
+ * should not pay for it.
+ *
+ * `since` bounds the per-result work to results performed on or after that date. The
+ * timeline is still refreshed in full — it is the cheap part.
+ */
+export async function fetchTestResultDetailsForFund(
+  companyId: HealthFundId,
+  options: Partial<ScraperOptions> & { since?: string } = {},
+): Promise<FetchOutcome> {
+  const { since, ...scraperOptions } = options;
+
+  return runFetch(
+    companyId,
+    'testResultDetails',
+    ['testResultDetails'],
+    (id, accounts) => storeTestResultDetails(id, accounts.flatMap((account) => account.testResults ?? [])),
+    { ...scraperOptions, ...(since ? { testResultDetailsSince: since } : {}) },
   );
 }
 

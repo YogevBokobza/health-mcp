@@ -19,7 +19,7 @@ process.env.HEALTH_MCP_AUDIT = 'off';
 const { HealthFundTypes, ScraperErrorTypes } = await import('israeli-health-scrapers');
 const { closeDatabase, openDatabase } = await import('../../src/db/database.js');
 const { saveCredentials } = await import('../../src/db/credentials.js');
-const { listTestResults } = await import('../../src/db/test-results.js');
+const { listTestResults, listTestResultValues } = await import('../../src/db/test-results.js');
 const { listVaccinations } = await import('../../src/db/vaccinations.js');
 const { listForm17Requests } = await import('../../src/db/form17.js');
 const { listMedications, upsertMedications } = await import('../../src/db/medications.js');
@@ -28,6 +28,7 @@ const {
   classifyFetchFailure,
   fetchFund,
   fetchForm17ForFund,
+  fetchTestResultDetailsForFund,
   fetchTestResultsForFund,
   fetchVaccinationsForFund,
 } = await import('../../src/sync/fetch.js');
@@ -36,7 +37,13 @@ const fictionalResult: TestResult = {
   id: 'fictional-sync-result',
   testName: 'בדיקת סנכרון בדיונית',
   performedOn: '2026-07-28',
+  resultedOn: null,
   orderingDoctor: 'ד״ר בדיקה בדיוני',
+  category: null,
+  kind: 'lab',
+  isPartial: false,
+  institute: null,
+  documentAvailable: false,
   provider: HealthFundTypes.maccabi,
 };
 
@@ -64,6 +71,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   scraperFactory.mockReset();
+  openDatabase().prepare('DELETE FROM test_result_values').run();
   openDatabase().prepare('DELETE FROM test_results').run();
   openDatabase().prepare('DELETE FROM medications').run();
   openDatabase().prepare('DELETE FROM form17_requests').run();
@@ -330,6 +338,78 @@ describe('fetchTestResultsForFund', () => {
       error_message: 'fictional rejected credentials',
     });
     expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')?.finished_at).not.toBeNull();
+  });
+});
+
+describe('fetchTestResultDetailsForFund', () => {
+  const labEntry: TestResult = {
+    ...fictionalResult,
+    id: 'fictional-sync-detail-result',
+    kind: 'lab',
+    values: [
+      {
+        code: 'FICT-1',
+        name: 'גלוקוז סנכרון בדיוני',
+        group: null,
+        value: 90,
+        text: null,
+        unit: 'mg/dl',
+        referenceMin: 70,
+        referenceMax: 100,
+        status: 'within',
+        measuredOn: '2026-07-28',
+      },
+    ],
+  };
+
+  it('requests testResultDetails, records its own sync-run resource, and stores values', async () => {
+    scraperFactory.mockReturnValue(successfulScraper([{ testResults: [labEntry] }]));
+
+    const outcome = await fetchTestResultDetailsForFund(HealthFundTypes.maccabi);
+
+    expect(scraperFactory).toHaveBeenCalledWith(
+      expect.objectContaining({ fetch: ['testResultDetails'] }),
+    );
+    expect(outcome).toMatchObject({ success: true, recordCount: 1 });
+    expect(listTestResultValues({ companyId: HealthFundTypes.maccabi })).toEqual([
+      expect.objectContaining({ name: 'גלוקוז סנכרון בדיוני', value: 90 }),
+    ]);
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'testResultDetails')).toMatchObject({
+      resource: 'testResultDetails',
+      success: 1,
+      record_count: 1,
+    });
+    // The cheap timeline resource's own history is untouched by the detail fetch.
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'testResults')).toBeNull();
+  });
+
+  it('passes since as testResultDetailsSince, not as a raw scraper option', async () => {
+    scraperFactory.mockReturnValue(successfulScraper([{ testResults: [] }]));
+
+    await fetchTestResultDetailsForFund(HealthFundTypes.maccabi, { since: '2026-01-01' });
+
+    expect(scraperFactory).toHaveBeenCalledWith(
+      expect.objectContaining({ testResultDetailsSince: '2026-01-01' }),
+    );
+  });
+
+  it('records finished failure history under its own resource, distinct from testResults', async () => {
+    scraperFactory.mockReturnValue({
+      scrape: vi.fn().mockResolvedValue({
+        success: false,
+        errorType: ScraperErrorTypes.InvalidPassword,
+        errorMessage: 'fictional detail credentials rejected',
+      }),
+    });
+
+    await expect(fetchTestResultDetailsForFund(HealthFundTypes.maccabi)).resolves.toMatchObject({
+      success: false,
+      status: 'credentials_rejected',
+    });
+    expect(lastSyncRun(HealthFundTypes.maccabi, 'testResultDetails')).toMatchObject({
+      success: 0,
+      error_message: 'fictional detail credentials rejected',
+    });
   });
 });
 
