@@ -195,3 +195,17 @@ Same rule as the library repo: never put real account data — real drug names, 
 names, ID numbers, addresses, or dates from an actual logged-in session — into a test,
 fixture, or committed file. Invent placeholder data with the same structural shape
 instead. This repo is public.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo's GitHub Issues, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles, label string equal to role name (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
