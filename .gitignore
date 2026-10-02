@@ -13,20 +13,11 @@ credentials.json
 .DS_Store
 .vscode/
 
-# Claude
-.claude/CLAUDE.md
-.claude/worktrees/
-
-# Graphify local state
+# AI
+.claude/
+.codex/
+.scratch/
+.zcode/
 graphify-out/
-graphify-out/.graphify_python
-graphify-out/.graphify_root
-graphify-out/.graphify_labels.json
-graphify-out/cost.json
-graphify-out/cache/
-
-# Repowise
 .repowise/
-
-# MCP
-*.mcp.json
+.mcp.json
